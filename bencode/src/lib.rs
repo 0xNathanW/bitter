@@ -1,14 +1,24 @@
-pub fn add(left: usize, right: usize) -> usize {
-    left + right
+use std::collections::HashMap;
+
+// Bencode types.
+pub enum Token {
+    
+    Integer(i64),
+
+    ByteString(Vec<u8>),
+    
+    List(Vec<Token>),
+    
+    Dictionary(HashMap<Vec<u8>, Token>),
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::path::Path;
 
     #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
+    fn load() {
+        let b = std::fs::read(Path::new("../debian.torrent")).unwrap();
+        println!("{:?}", String::from_utf8_lossy(&b));
     }
 }
