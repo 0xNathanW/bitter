@@ -1,3 +1,12 @@
+#![allow(unused)]
+
+// Convention from https://serde.rs/conventions.html
+mod ser;
+mod de;
+mod error;
+mod map;
+mod token;
+
 use std::collections::HashMap;
 
 // Bencode types.
