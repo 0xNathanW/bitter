@@ -1,6 +1,7 @@
 use std::collections::HashMap;
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
 use serde::ser::{SerializeSeq, SerializeMap};
+use serde::de;
 
 // Bencode types.
 pub enum Token {
@@ -35,5 +36,80 @@ impl Serialize for Token {
                 map.end()
             },
         }
+    }
+}
+
+impl Deserialize for Token {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where D: serde::Deserializer<'de> 
+    {
+        deserializer.deserialize_any(TokenVisitor)
+    }
+}
+
+pub struct TokenVisitor;
+
+impl<'de> de::Visitor<'de> for TokenVisitor {
+
+    type Value = Token;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter.write_str("any bencode token type")
+    }
+
+    fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
+        where E: de::Error 
+    {
+        Ok(Token::Integer(v))
+    }
+
+    fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
+        where E: de::Error
+    {
+        Ok(Token::Integer(v as i64))
+    }
+
+    fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+        where E: de::Error 
+    {
+        Ok(Token::ByteString(v.into()))    
+    }
+
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+        where E: de::Error 
+    {
+        Ok(Token::ByteString(v.into()))    
+    }
+
+    fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+        where E: de::Error
+    {
+        Ok(Token::ByteString(v.into()))
+    }
+
+    fn visit_borrowed_str<E>(self, v: &'de str) -> Result<Self::Value, E>
+        where E: de::Error 
+    {
+        Ok(Token::ByteString(v.into()))    
+    }
+
+    fn visit_seq<A>(self, seq: A) -> Result<Self::Value, A::Error>
+        where A: de::SeqAccess<'de>
+    {
+        let mut out = Vec::new();
+        while let Some(elem) = seq.next_element()? {
+            out.push(elem)
+        }
+        Ok(Token::List(out))
+    }
+
+    fn visit_map<A>(self, map: A) -> Result<Self::Value, A::Error>
+        where
+            A: de::MapAccess<'de>, {
+        let mut hmap = HashMap::new();
+        if let Some((k, v)) = map.next_entry()? {
+            hmap.insert(k.into_vec(), v)
+        }
+        Ok(Token::Dictionary(hmap))
     }
 }

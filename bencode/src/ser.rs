@@ -4,18 +4,19 @@ use serde::ser::{Serializer, SerializeSeq};
 use super::error::{Error, Result};
 use super::map::SerializeMap;
 
-pub fn encode_raw<T: ser::Serialize>(v: &T) -> Result<Vec<u8>> {
+pub fn encode_to_raw<T: ser::Serialize>(v: &T) -> Result<Vec<u8>> {
     let mut encoder = Encoder::new();
     v.serialize(&mut encoder)?;
     Ok(encoder.into_buf())
 }
 
-pub fn encode<T: ser::Serialize>(v: &T) -> Result<String> {
+pub fn encode_to_string<T: ser::Serialize>(v: &T) -> Result<String> {
     let mut encoder = Encoder::new();
     v.serialize(&mut encoder)?;
-    std::str::from_utf8(encoder.as_ref())
-        .map(|s| s.to_string())
-        .map_err(|_| Error::InvalidToken("not a utf-8".to_string()))
+    match std::str::from_utf8(encoder.as_ref()) {
+        Ok(s) => Ok(s.to_string()),
+        Err(_) => Error::InvalidToken("not a utf-8".to_string()),
+    }
 }
 
 #[derive(Default)]
@@ -34,9 +35,7 @@ impl Encoder {
 }
 
 impl AsRef<[u8]> for Encoder {
-    fn as_ref(&self) -> &[u8] {
-        &self.0
-    }
+    fn as_ref(&self) -> &[u8] { &self.0 }
 }
 
 impl<'a> Serializer for &'a mut Encoder {
@@ -312,22 +311,29 @@ impl ser::SerializeTupleVariant for &mut Encoder {
 #[cfg(test)]
 mod test{
 
+    use std::collections::HashMap;
+    use crate::ser::encode_to_string;
+
     use super::encode;
     use serde::{Serialize, ser::SerializeStruct, Serializer};
 
-    struct TestStruct {
-        a: u8,
-        b: u8,
+    struct TestStruct<'a> {
+        a: &'a str,
+        b: i64,
+        c: Vec<u8>,
+        d: HashMap<&'a str, Vec<u8>>,
     }
 
-    impl Serialize for TestStruct {
+    impl Serialize for TestStruct<'_> {
 
         fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
             where S: Serializer 
         {
-               let mut state = serializer.serialize_struct("TestStrcut", 3)?;
+               let mut state = serializer.serialize_struct("TestStrcut", 2)?;
                state.serialize_field("a", &self.a)?;
                state.serialize_field("b", &self.b)?;
+               state.serialize_field("c", &self.c)?;
+               state.serialize_field("d", &self.d)?;
                state.end()
         }
     }
@@ -335,14 +341,17 @@ mod test{
     #[test]
     fn test_serialization() {
 
-        let s = TestStruct {
-            a: 5,
-            b: 9,
+        let mut s = TestStruct {
+            a: "foo",
+            b: 999,
+            c: vec![1, 2, 3],
+            d: HashMap::new()
         };
 
-        let out = encode(&s).unwrap();
-        
-        println!("{}", out);
-    }
+        s.d.insert("foo", vec![1, 2, 3]);
+        s.d.insert("bar", vec![4, 5, 6]);
 
+        let out = encode_to_string(&s).unwrap();
+        assert_eq!(out, "d1:a3:foo1:bi999e1:cli1ei2ei3ee1:dd3:barli4ei5ei6ee3:fooli1ei2ei3eeee".to_string());
+    }
 }

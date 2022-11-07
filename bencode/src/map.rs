@@ -34,13 +34,13 @@ impl<'a> SerializeMap<'a> {
         // Take items and sort lexicographically.
         let mut items = mem::take(&mut self.items);
         items.sort_by(| k, v| {k.cmp(v)});
-        
+
         self.serializer.push("d");
         for (k, v) in items {
-            self.serializer.serialize_bytes(&k)?;
+            //self.serializer.serialize_bytes(&k)?;
+            self.serializer.push(k);
             self.serializer.push(v);
         }
-
         self.serializer.push("e");
         Ok(())
     }
@@ -55,7 +55,9 @@ impl<'a> ser::SerializeMap for SerializeMap<'a> {
     {
         match self.current_key {
             // We are supposed to be serializing value here.
-            Some(_) => Err(Error::MapSerializationOrder("".to_string())),
+            Some(_) => Err(Error::MapSerializationOrder(
+                "consecutive calls to serialize key without serializing value".to_string()
+            )),
             None => {
                 let mut ser = Encoder::new();
                 key.serialize(&mut ser);
@@ -69,7 +71,9 @@ impl<'a> ser::SerializeMap for SerializeMap<'a> {
         where T: serde::Serialize 
     {
         let key = self.current_key.take().ok_or_else(
-            || { Error::InvalidToken("BingQiLing".to_string()) }
+            || { 
+                Error::InvalidToken("attempted to serialize a value without a key".to_string()) 
+            }
         )?;
 
         let mut ser = Encoder::new();
@@ -91,7 +95,9 @@ impl<'a> ser::SerializeMap for SerializeMap<'a> {
         where K: serde::Serialize, V: serde::Serialize, 
     {
         if self.current_key.is_some() {
-            return Err(Error::MapSerializationOrder("".to_string()))
+            return Err(Error::MapSerializationOrder(
+                "attemped to serialize entry whilst holding a key".to_string()
+            ))
         }
 
         let mut key_ser = Encoder::new();
