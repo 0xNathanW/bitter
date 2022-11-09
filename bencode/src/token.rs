@@ -39,7 +39,7 @@ impl Serialize for Token {
     }
 }
 
-impl Deserialize for Token {
+impl<'de> Deserialize<'de> for Token {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
         where D: serde::Deserializer<'de> 
     {
@@ -93,7 +93,7 @@ impl<'de> de::Visitor<'de> for TokenVisitor {
         Ok(Token::ByteString(v.into()))    
     }
 
-    fn visit_seq<A>(self, seq: A) -> Result<Self::Value, A::Error>
+    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
         where A: de::SeqAccess<'de>
     {
         let mut out = Vec::new();
@@ -103,12 +103,12 @@ impl<'de> de::Visitor<'de> for TokenVisitor {
         Ok(Token::List(out))
     }
 
-    fn visit_map<A>(self, map: A) -> Result<Self::Value, A::Error>
-        where
-            A: de::MapAccess<'de>, {
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+        where A: de::MapAccess<'de> 
+    {
         let mut hmap = HashMap::new();
         if let Some((k, v)) = map.next_entry()? {
-            hmap.insert(k.into_vec(), v)
+            hmap.insert(k, v);
         }
         Ok(Token::Dictionary(hmap))
     }

@@ -26,9 +26,17 @@ pub enum Error {
     MapSerializationOrder(String),
 
     Custom(String),
+
+    EOF,
 }
 
 impl ser::Error for Error {
+    fn custom<T>(msg:T) -> Self where T:Display {
+        Error::Custom(msg.to_string())
+    }
+}
+
+impl de::Error for Error {
     fn custom<T>(msg:T) -> Self where T:Display {
         Error::Custom(msg.to_string())
     }
@@ -53,6 +61,7 @@ impl std::fmt::Display for Error {
             Error::UnknownField(s)          => s,
             Error::Custom(s)                => s,
             Error::MapSerializationOrder(s) => s,
+            Error::EOF                               => "end of stream"
         };
         f.write_str(error_msg)
     }

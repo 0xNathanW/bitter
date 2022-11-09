@@ -15,7 +15,7 @@ pub fn encode_to_string<T: ser::Serialize>(v: &T) -> Result<String> {
     v.serialize(&mut encoder)?;
     match std::str::from_utf8(encoder.as_ref()) {
         Ok(s) => Ok(s.to_string()),
-        Err(_) => Error::InvalidToken("not a utf-8".to_string()),
+        Err(_) => Err(Error::InvalidToken("not a utf-8".to_string())),
     }
 }
 
@@ -312,9 +312,8 @@ impl ser::SerializeTupleVariant for &mut Encoder {
 mod test{
 
     use std::collections::HashMap;
-    use crate::ser::encode_to_string;
+    use super::encode_to_string;
 
-    use super::encode;
     use serde::{Serialize, ser::SerializeStruct, Serializer};
 
     struct TestStruct<'a> {
@@ -355,3 +354,4 @@ mod test{
         assert_eq!(out, "d1:a3:foo1:bi999e1:cli1ei2ei3ee1:dd3:barli4ei5ei6ee3:fooli1ei2ei3eeee".to_string());
     }
 }
+

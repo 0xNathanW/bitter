@@ -4,3 +4,5 @@ It supports four different types of values:
 - integers,
 - lists, and
 - dictionaries (associative arrays).
+
+## Maybe add a counter so can print which line errors occur at.
