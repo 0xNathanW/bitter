@@ -2,8 +2,8 @@ use std::mem;
 
 use serde::{ser, Serializer};
 
-use super::ser::Encoder;
-use super::error::Error;
+use super::encoder::Encoder;
+use crate::error::Error;
 
 // A dictionary is encoded as d<contents>e. The elements of the dictionary are encoded with each key immediately 
 // followed by its value. All keys must be byte strings and must appear in lexicographical order. A dictionary that associates 

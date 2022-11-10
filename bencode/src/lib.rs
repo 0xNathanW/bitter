@@ -1,10 +1,9 @@
 #![allow(unused)]
 
 // Convention from https://serde.rs/conventions.html
-mod ser;
-mod de;
+mod encode;
+mod decode;
 mod error;
-mod map;
 mod token;
 
 use std::collections::HashMap;

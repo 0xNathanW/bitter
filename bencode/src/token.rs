@@ -2,8 +2,10 @@ use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
 use serde::ser::{SerializeSeq, SerializeMap};
 use serde::de;
+use serde_bytes::{ByteBuf, Bytes};
 
 // Bencode types.
+#[derive(Debug, PartialEq, Eq)]
 pub enum Token {
     Integer(i64),
     ByteString(Vec<u8>),
@@ -103,12 +105,12 @@ impl<'de> de::Visitor<'de> for TokenVisitor {
         Ok(Token::List(out))
     }
 
-    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+    fn visit_map<A>(self, mut access: A) -> Result<Self::Value, A::Error>
         where A: de::MapAccess<'de> 
     {
         let mut hmap = HashMap::new();
-        if let Some((k, v)) = map.next_entry()? {
-            hmap.insert(k, v);
+        while let Some((k, v)) = access.next_entry::<ByteBuf, _>()? {
+            hmap.insert(k.into_vec(), v);
         }
         Ok(Token::Dictionary(hmap))
     }
