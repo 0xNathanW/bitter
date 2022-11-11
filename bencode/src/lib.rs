@@ -1,20 +1,14 @@
-#![allow(unused)]
-
 // Convention from https://serde.rs/conventions.html
 mod encode;
 mod decode;
 mod error;
 mod token;
 
-use std::collections::HashMap;
-
 #[cfg(test)]
-mod tests {
-    use std::path::Path;
+mod torrent_test;
 
-    #[test]
-    fn load() {
-        let b = std::fs::read(Path::new("../debian.torrent")).unwrap();
-        println!("{:?}", String::from_utf8_lossy(&b));
-    }
-}
+// For bencode -> T
+pub use decode::{decode_bytes, decode_str};
+
+// For T -> bencode
+pub use encode::{encode_to_raw, encode_to_str};

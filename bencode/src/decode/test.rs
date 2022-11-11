@@ -1,16 +1,16 @@
-use std::{collections::HashMap, f32::consts::E, str::EncodeUtf16};
+use std::collections::HashMap;
 use serde_derive::Deserialize;
 use crate::token::Token;
-use super::{decode_str};
+use super::decode_str;
 
 #[test]
-fn decode_num() {
+fn decode_to_num() {
     let r: i64 = decode_str("i666e").unwrap();
     assert_eq!(r, 666);
 }
 
 #[test]
-fn decode_string() {
+fn decode_to_string() {
     let r: String = decode_str("3:yes").unwrap();
     assert_eq!(r, "yes");
 }
@@ -40,7 +40,7 @@ fn decode_to_struct() {
 }
 
 #[test]
-fn decode_map() {
+fn decode_to_map() {
     let b = "d1:xi1111e1:y3:doge";
     let r: Token = decode_str(b).unwrap();
     let mut d = HashMap::new();

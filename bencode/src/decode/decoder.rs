@@ -6,7 +6,6 @@ use serde::{
 };
 
 use crate::error::{Error, Result};
-use crate::token::TokenVisitor;
 use super::DecodedType;
 use super::access::Access;
 
@@ -132,7 +131,7 @@ impl<'de, 'a, R: Read> Deserializer<'de> for &'a mut Decoder<R> {
 
     fn deserialize_newtype_struct<V>(
             self,
-            name: &'static str,
+            _name: &'static str,
             visitor: V,
         ) -> Result<V::Value>
         where V: de::Visitor<'de> 
@@ -148,8 +147,8 @@ impl<'de, 'a, R: Read> Deserializer<'de> for &'a mut Decoder<R> {
 
     fn deserialize_enum<V>(
             self,
-            name: &'static str,
-            variants: &'static [&'static str],
+            _name: &'static str,
+            _variants: &'static [&'static str],
             visitor: V,
         ) -> Result<V::Value>
         where V: de::Visitor<'de> 

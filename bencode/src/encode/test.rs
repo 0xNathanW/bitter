@@ -2,7 +2,25 @@ use std::collections::HashMap;
 
 use serde::{Serialize, ser::SerializeStruct, Serializer};
 
-use super::encode_to_string;
+use super::encode_to_str;
+
+#[test]
+fn serialize_string() {
+    let r = encode_to_str(&"foo").unwrap();
+    assert_eq!(r, "3:foo")
+}
+
+#[test]
+fn serialize_num() {
+    let r = encode_to_str(&999).unwrap();
+    assert_eq!(r, "i999e")
+}
+
+#[test]
+fn serialize_vec() {
+    let r = encode_to_str(&vec!["fooo", "bar"]).unwrap();
+    assert_eq!(r, "l4:fooo3:bare")
+}
 
 struct TestStruct<'a> {
     a: &'a str,
@@ -32,6 +50,6 @@ fn test_serialization() {
     };
     s.d.insert("foo", vec![1, 2, 3]);
     s.d.insert("bar", vec![4, 5, 6]);
-    let out = encode_to_string(&s).unwrap();
+    let out = encode_to_str(&s).unwrap();
     assert_eq!(out, "d1:a3:foo1:bi999e1:cli1ei2ei3ee1:dd3:barli4ei5ei6ee3:fooli1ei2ei3eeee".to_string());
 }

@@ -16,7 +16,7 @@ impl Encoder {
     }
 
     // Returns ownership of underlying buf, consuming encoder.
-    pub fn into_buf(mut self) -> Vec<u8> { self.0 }
+    pub fn into_buf(self) -> Vec<u8> { self.0 }
 }
 
 impl AsRef<[u8]> for Encoder {
@@ -82,11 +82,11 @@ impl<'a> Serializer for &'a mut Encoder {
         self.serialize_u64(v as u64)
     }
 
-    fn serialize_f32(self, v: f32) -> Result<()> {
+    fn serialize_f32(self, _: f32) -> Result<()> {
         Err(Error::InvalidType("cannot serialize type f32".to_string()))
     }
 
-    fn serialize_f64(self, v: f64) -> Result<()> {
+    fn serialize_f64(self, _: f64) -> Result<()> {
         Err(Error::InvalidType("cannot serialize type f64".to_string()))
     }
 
@@ -115,8 +115,8 @@ impl<'a> Serializer for &'a mut Encoder {
 
     fn serialize_unit_variant(
             self,
-            name: &'static str,
-            variant_index: u32,
+            _name: &'static str,
+            _variant_index: u32,
             variant: &'static str,
         ) -> Result<()> 
     {
@@ -125,7 +125,7 @@ impl<'a> Serializer for &'a mut Encoder {
 
     fn serialize_newtype_struct<T: ?Sized>(
             self,
-            name: &'static str,
+            _name: &'static str,
             value: &T,
         ) -> Result<()>
         where T: serde::Serialize 
@@ -135,7 +135,7 @@ impl<'a> Serializer for &'a mut Encoder {
 
     fn serialize_unit(self) -> Result<()> { Ok(()) }
 
-    fn serialize_unit_struct(self, name: &'static str) -> Result<()> { Ok(()) }
+    fn serialize_unit_struct(self, _name: &'static str) -> Result<()> { Ok(()) }
 
     fn serialize_some<T: ?Sized>(self, value: &T) -> Result<()>
         where T: serde::Serialize 
@@ -149,7 +149,7 @@ impl<'a> Serializer for &'a mut Encoder {
     // concatenated. A list consisting of the string "spam" and the number 42 would be encoded as: l4:spami42ee. Note the 
     // absence of separators between elements, and the first character is the letter 'l', not digit '1'.
 
-    fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq> {
+    fn serialize_seq(self, _len: Option<usize>) -> Result<Self::SerializeSeq> {
         self.push("l");
         Ok(self)
     }
@@ -160,7 +160,7 @@ impl<'a> Serializer for &'a mut Encoder {
 
     fn serialize_tuple_struct(
             self,
-            name: &'static str,
+            _name: &'static str,
             len: usize,
         ) -> Result<Self::SerializeTupleStruct> 
     {
@@ -178,7 +178,7 @@ impl<'a> Serializer for &'a mut Encoder {
 
     fn serialize_struct(
             self,
-            name: &'static str,
+            _name: &'static str,
             len: usize,
         ) -> Result<Self::SerializeStruct> 
     {
@@ -187,8 +187,8 @@ impl<'a> Serializer for &'a mut Encoder {
 
     fn serialize_struct_variant(
             self,
-            name: &'static str,
-            variant_index: u32,
+            _name: &'static str,
+            _variant_index: u32,
             variant: &'static str,
             len: usize,
         ) -> Result<Self::SerializeStructVariant> 
@@ -200,8 +200,8 @@ impl<'a> Serializer for &'a mut Encoder {
 
     fn serialize_newtype_variant<T: ?Sized>(
             self,
-            name: &'static str,
-            variant_index: u32,
+            _name: &'static str,
+            _variant_index: u32,
             variant: &'static str,
             value: &T,
         ) -> Result<()>
@@ -216,10 +216,10 @@ impl<'a> Serializer for &'a mut Encoder {
 
     fn serialize_tuple_variant(
             self,
-            name: &'static str,
-            variant_index: u32,
+            _name: &'static str,
+            _variant_index: u32,
             variant: &'static str,
-            len: usize,
+            _len: usize,
         ) -> Result<Self::SerializeTupleVariant> 
     {
         self.push("d");

@@ -1,6 +1,6 @@
 use std::mem;
 
-use serde::{ser, Serializer};
+use serde::ser;
 
 use super::encoder::Encoder;
 use crate::error::Error;
@@ -60,7 +60,7 @@ impl<'a> ser::SerializeMap for SerializeMap<'a> {
             )),
             None => {
                 let mut ser = Encoder::new();
-                key.serialize(&mut ser);
+                key.serialize(&mut ser)?;
                 self.current_key = Some(ser.into_buf());
                 Ok(())
             }

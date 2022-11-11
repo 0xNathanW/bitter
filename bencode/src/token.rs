@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
 use serde::ser::{SerializeSeq, SerializeMap};
 use serde::de;
-use serde_bytes::{ByteBuf, Bytes};
+use serde_bytes::ByteBuf;
 
 // Bencode types.
 #[derive(Debug, PartialEq, Eq)]

@@ -95,7 +95,7 @@ impl<'de, 'a, R: Read> de::VariantAccess<'de> for Access<'a, R> {
 
     fn struct_variant<V>(
             self,
-            fields: &'static [&'static str],
+            _fields: &'static [&'static str],
             visitor: V,
         ) -> Result<V::Value>
         where V: de::Visitor<'de> 
