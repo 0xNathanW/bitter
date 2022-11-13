@@ -4,14 +4,14 @@ use std::fs::read;
 use std::path::Path;
 
 use serde_bytes::ByteBuf;
-use serde_derive::{self, Deserialize};
+use serde_derive::{self, Deserialize, Serialize};
 
-use crate::decode_bytes;
+use crate::{decode_bytes, encode_to_str, encode_to_raw};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct Node(String, i64);
 
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 struct File {
     path: Vec<String>,
     length: i64,
@@ -19,10 +19,11 @@ struct File {
     md5sum: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct Info {
     name: String,
-    pieces: ByteBuf,
+    #[serde(with = "serde_bytes")]
+    pieces: Vec<u8>,
     #[serde(rename = "piece length")]
     piece_length: i64,
     #[serde(default)]
@@ -40,7 +41,7 @@ struct Info {
     root_hash: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct Torrent {
     #[serde(default)]
     announce: String,
@@ -67,7 +68,7 @@ struct Torrent {
 #[test]
 fn single_file_torrent() {
     
-    let torrent = read(Path::new("./test_torrents/test_single_file.torrent"))
+    let torrent = read(Path::new("../test_torrents/test_single_file.torrent"))
         .expect("error reading file content");
 
     let out: Torrent = decode_bytes(&torrent).unwrap();
@@ -77,4 +78,7 @@ fn single_file_torrent() {
     assert_eq!(out.info.name, "backbox-6-desktop-amd64.iso");
     assert_eq!(out.info.piece_length, 2097152);
     assert_eq!(out.info.files, None);
+
+    let s = encode_to_raw(&out).unwrap();
+    assert_eq!(torrent, s);
 }
