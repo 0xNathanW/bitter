@@ -4,6 +4,7 @@ use crate::error::{Error, Result};
 
 mod encoder;
 mod map;
+mod string;
 #[cfg(test)]
 mod test;
 

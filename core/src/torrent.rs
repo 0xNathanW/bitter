@@ -4,6 +4,8 @@ use serde_derive::{Deserialize, Serialize};
 use sha1::{Sha1, Digest};
 use bencode::{decode_bytes, encode_to_raw};
 
+use crate::{Result, Error};
+
 #[derive(Debug, Deserialize)]
 struct Node(String, i64);
 
@@ -111,14 +113,17 @@ pub struct Torrent {
 
 impl Torrent {
 
-    pub fn new(path: &Path) -> Self { 
+    pub fn new(path: &Path) -> Result<Self> {
 
-        let data = read(path).unwrap();
-        let mut torrent: Torrent = decode_bytes(&data).unwrap();
+        let data = read(path)?;
+        let mut torrent: Torrent = decode_bytes(&data)
+            .map_err(
+                |_| Error::BencodeError("failed to deserialize torrent".to_string())
+            )?;
         
-        torrent.info_hash = torrent.info.info_hash();
+        torrent.info_hash = torrent.info.info_hash()?;
         
-        torrent
+        Ok(torrent)
     }
 
     pub fn announce(&self) -> &str { &self.announce }
@@ -128,17 +133,20 @@ impl Torrent {
     pub fn name(&self) -> &str { &self.info.name }
 
     pub fn piece_length(&self) -> i64 { self.info.piece_length }
+
+    
 }
 
 impl Info {
-
     // Calculates the sha1 hash of info dict to verify torrent integrity.
-    fn info_hash(&self) -> [u8; 20] {
+    fn info_hash(&self) -> Result<[u8; 20]> {
         let mut hasher = Sha1::new();
         // Serialize info dict into bencode.
-        let info_data = encode_to_raw(&self).unwrap();
+        let info_data = encode_to_raw(&self)
+            .map_err(|_| Error::BencodeError("failed to encode info dict".to_string())
+        )?;
         hasher.update(info_data);
-        hasher.finalize().into()
+        Ok(hasher.finalize().into())
     }
 }
 
@@ -147,17 +155,18 @@ mod test {
     
     use std::path::Path;
     use super::Torrent;
+    use hex_literal::hex;
 
     #[test]
     fn new_torrent() {
         let p = Path::new("../test_torrents/test_single_file.torrent");
-        let torrent = Torrent::new(&p);
+        let torrent = Torrent::new(&p).unwrap();
 
         assert_eq!(torrent.announce(), "http://linuxtracker.org:2710/00000000000000000000000000000000/announce");
         assert_eq!(torrent.encoding(), Some("UTF-8"));
         assert_eq!(torrent.name(), "backbox-6-desktop-amd64.iso");
         assert_eq!(torrent.piece_length(), 2097152);
-        println!("{:x?}", torrent.info_hash);
+        assert_eq!(torrent.info_hash[..], hex!("bd00ed1cf18e575a5cb829d4349bceed34d76833"));
     }
 
 }

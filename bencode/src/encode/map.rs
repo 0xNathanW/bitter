@@ -1,7 +1,7 @@
 use std::mem;
-
 use serde::ser;
 
+use super::string::StringSerializer;
 use super::encoder::Encoder;
 use crate::error::Error;
 
@@ -33,12 +33,12 @@ impl<'a> SerializeMap<'a> {
         }
         // Take items and sort lexicographically.
         let mut items = mem::take(&mut self.items);
-        items.sort_by(| k, v| {k.cmp(v)});
+        items.sort_by(| &(ref k, _), &(ref v, _) | { k.cmp(v) });
 
         self.serializer.push("d");
         for (k, v) in items {
-            //self.serializer.serialize_bytes(&k)?;
-            self.serializer.push(k);
+            ser::Serializer::serialize_bytes(&mut *self.serializer, k.as_ref())?;
+            //self.serializer.push(k);
             self.serializer.push(v);
         }
         self.serializer.push("e");
@@ -59,9 +59,7 @@ impl<'a> ser::SerializeMap for SerializeMap<'a> {
                 "consecutive calls to serialize key without serializing value".to_string()
             )),
             None => {
-                let mut ser = Encoder::new();
-                key.serialize(&mut ser)?;
-                self.current_key = Some(ser.into_buf());
+                self.current_key = Some(key.serialize(&mut StringSerializer)?);
                 Ok(())
             }
         }
@@ -100,9 +98,7 @@ impl<'a> ser::SerializeMap for SerializeMap<'a> {
             ))
         }
 
-        let mut key_ser = Encoder::new();
-        key.serialize(&mut key_ser)?;
-        let key = key_ser.into_buf();
+        let key = key.serialize(&mut StringSerializer)?;
 
         let mut val_ser = Encoder::new();
         value.serialize(&mut val_ser)?;
