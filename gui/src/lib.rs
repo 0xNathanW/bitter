@@ -1,6 +1,6 @@
 #![warn(clippy::all, rust_2018_idioms)]
 
-mod widgets;
+pub mod widgets;
 mod app;
 pub use app::App;
 

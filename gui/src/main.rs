@@ -8,7 +8,7 @@ fn main() {
     let options = eframe::NativeOptions::default();
     
     eframe::run_native(
-        "gui",
+        "bitter-rs",
         options,
         Box::new(|cc| Box::new(gui::App::new(cc))),
     );
