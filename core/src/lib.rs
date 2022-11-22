@@ -1,6 +1,7 @@
 use thiserror::Error;
 
 pub mod torrent;
+pub mod tracker;
 
 pub type Result<T> = std::result::Result<T, Error>;
 

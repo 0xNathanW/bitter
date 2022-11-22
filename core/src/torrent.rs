@@ -113,7 +113,7 @@ pub struct Torrent {
 
 impl Torrent {
 
-    pub fn new(path: &Path) -> Result<Self> {
+    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
 
         let data = read(path)?;
         let mut torrent: Torrent = decode_bytes(&data)
@@ -128,13 +128,17 @@ impl Torrent {
 
     pub fn announce(&self) -> &str { &self.announce }
 
+    pub fn backup_announce(&self) -> Option<&Vec<String>> {
+        self.announce_list.as_ref().map(|v| &v[0])
+    }
+
+    pub fn info_hash(&self) -> &[u8; 20] { &self.info_hash }
+
     pub fn encoding(&self) -> Option<&str> { self.encoding.as_deref() }
 
     pub fn name(&self) -> &str { &self.info.name }
 
     pub fn piece_length(&self) -> i64 { self.info.piece_length }
-
-    
 }
 
 impl Info {
@@ -148,6 +152,12 @@ impl Info {
         hasher.update(info_data);
         Ok(hasher.finalize().into())
     }
+
+    pub fn is_private(&self) -> bool { self.private == Some(1) }
+
+    pub fn is_multi_file(&self) -> bool { self.files.is_some() }
+
+    
 }
 
 #[cfg(test)]
