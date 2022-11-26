@@ -12,6 +12,7 @@ thiserror       = "1.0.37"
 bencode         = {version = "0.1.0", path = "../bencode"}
 crossbeam       = "0.8.2"
 hyper           = "0.14.15"
+chrono          = "0.4.23"
 
 [dev-dependencies]
 hex-literal = "0.3.4"

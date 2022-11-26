@@ -121,24 +121,75 @@ impl Torrent {
                 |_| Error::BencodeError("failed to deserialize torrent".to_string())
             )?;
         
+        if torrent.info.pieces.len() % 20 != 0 {
+            return Err(Error::BencodeError("invalid pieces length".to_string()));
+        }
+
         torrent.info_hash = torrent.info.info_hash()?;
         
         Ok(torrent)
     }
 
+    // Implement getters as struct should remain immutable.
+
+    pub fn files(&self) -> &Option<Vec<File>> {
+        &self.info.files
+    } 
+    
+    pub fn name(&self) -> &str { &self.info.name }
+
     pub fn announce(&self) -> &str { &self.announce }
 
-    pub fn backup_announce(&self) -> Option<&Vec<String>> {
+    pub fn announce_list(&self) -> Option<&Vec<String>> {
         self.announce_list.as_ref().map(|v| &v[0])
+    }
+
+    pub fn created_by(&self) -> Option<&str> {
+        self.created_by.as_ref().map(|s| s.as_str())
+    }
+
+    pub fn comment(&self) -> Option<&str> {
+        self.comment.as_ref().map(|s| s.as_str())
+    }
+
+    pub fn creation_date_fmt(&self) -> Option<String> {
+        self.creation_date.map(|v| {
+            let date = chrono::NaiveDateTime::from_timestamp_opt(v, 0);
+            date.map(|v| v.format("%Y-%m-%d %H:%M:%S").to_string())
+                .unwrap_or_else(|| "Invalid date".to_string())
+        })
     }
 
     pub fn info_hash(&self) -> &[u8; 20] { &self.info_hash }
 
     pub fn encoding(&self) -> Option<&str> { self.encoding.as_deref() }
 
-    pub fn name(&self) -> &str { &self.info.name }
-
     pub fn piece_length(&self) -> i64 { self.info.piece_length }
+
+    pub fn pieces_iter(&self) -> impl Iterator<Item = &[u8]> {
+        self.info.pieces.chunks(20)
+    }
+
+    pub fn num_pieces(&self) -> usize { self.info.pieces.len() / 20 }
+
+    pub fn is_private(&self) -> bool { self.info.private == Some(1) }
+    
+    pub fn is_multi_file(&self) -> bool { self.info.files.is_some() }
+
+    pub fn size_fmt(&self) -> String {
+        if self.is_multi_file() {
+            let size = self.info.files.as_ref().unwrap().iter()
+                .map(|f| f.length)
+                .sum::<i64>();
+            format_size(size)
+        } else {
+            format_size(self.info.length.unwrap())
+        }
+    }
+
+    pub fn md5sum(&self) -> Option<&str> {
+        self.info.md5sum.as_deref()
+    }
 }
 
 impl Info {
@@ -151,13 +202,43 @@ impl Info {
         )?;
         hasher.update(info_data);
         Ok(hasher.finalize().into())
+    }    
+}
+
+impl File {
+    pub fn path(&self) -> String {
+        self.path.join("/")
     }
 
-    pub fn is_private(&self) -> bool { self.private == Some(1) }
+    pub fn size_fmt(&self) -> String {
+        format_size(self.length)
+    }
 
-    pub fn is_multi_file(&self) -> bool { self.files.is_some() }
+    pub fn md5sum(&self) -> Option<&str> {
+        self.md5sum.as_deref()
+    }
+}
 
-    
+fn format_size(bytes: i64) -> String {
+    let mut size = bytes as f64;
+    let mut unit = "B";
+    if size > 1024.0 {
+        size /= 1024.0;
+        unit = "KiB";
+    }
+    if size > 1024.0 {
+        size /= 1024.0;
+        unit = "MiB";
+    }
+    if size > 1024.0 {
+        size /= 1024.0;
+        unit = "GiB";
+    }
+    if size > 1024.0 {
+        size /= 1024.0;
+        unit = "TiB";
+    }
+    format!("{:.2} {}", size, unit)
 }
 
 #[cfg(test)]
@@ -177,6 +258,10 @@ mod test {
         assert_eq!(torrent.name(), "backbox-6-desktop-amd64.iso");
         assert_eq!(torrent.piece_length(), 2097152);
         assert_eq!(torrent.info_hash[..], hex!("bd00ed1cf18e575a5cb829d4349bceed34d76833"));
+        assert_eq!(torrent.is_private(), true);
+        assert_eq!(torrent.creation_date_fmt(), Some("2019-06-11 06:51:42".to_string()));
+    
+        println!("{:?}", torrent);
     }
 
 }

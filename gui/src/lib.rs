@@ -1,8 +1,9 @@
 #![warn(clippy::all, rust_2018_idioms)]
 
-pub mod widgets;
+mod widgets;
 mod app;
-pub use app::App;
+mod gui;
+pub use gui::Gui;
 
 #[cfg(test)]
 mod test {

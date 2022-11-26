@@ -1,15 +1,17 @@
 use std::collections::BTreeSet;
 
+pub mod info;
+
 #[derive(Default)]
 pub struct Widgets {
     // Widgets.
-    items: Vec<Box<dyn Widget>>,
+    pub items: Vec<Box<dyn Widget>>,
     // Tracks which widgets are open.
-    open:  BTreeSet<String>,
+    pub open:  BTreeSet<String>,
 }
 
 pub trait Widget {
-    
+
     fn name(&self) -> &'static str;
 
     fn display(&mut self, ctx: &egui::Context, open: &mut bool); 
@@ -28,7 +30,7 @@ impl Widgets {
         }
     }
 
-    pub fn display(&mut self, ctx: &egui::Context, frame: &eframe::Frame) {
+    pub fn display(&mut self, ctx: &egui::Context, _frame: &eframe::Frame) {
         
         egui::SidePanel::left("widgets")
             .resizable(true)
@@ -57,10 +59,18 @@ impl Widgets {
                 });
 
             });
+
+        self.show_windows(ctx);
     }
 
-    fn add_contents(&mut self, ctx: &egui::Context, frame: &eframe::Frame) {
+    fn show_windows(&mut self, ctx: &egui::Context) {
+        let Self { items, open } = self;
 
+        for item in items {
+            let mut is_open = open.contains(item.name());
+            item.display(ctx, &mut is_open);
+            set_open(open, item.name(), is_open);
+        }
     }
 
 }

@@ -5,8 +5,11 @@ authors = ["Nathan W"]
 edition = "2021"
 
 [dependencies]
+core = { path = "../core" }
 egui = "0.19.0"
+egui_extras = "0.19.0"
 eframe = { version = "0.19.0", features = ["persistence"] }
+hex = "0.4.3"
 
 # You only need serde if you want app persistence:
 serde = { version = "1", features = ["derive"] }

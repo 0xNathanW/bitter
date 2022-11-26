@@ -10,7 +10,7 @@ fn main() {
     eframe::run_native(
         "bitter-rs",
         options,
-        Box::new(|cc| Box::new(gui::App::new(cc))),
+        Box::new(|cc| Box::new(gui::Gui::new(cc))),
     );
 }
 
