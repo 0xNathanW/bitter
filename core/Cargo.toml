@@ -9,10 +9,11 @@ serde_bytes     = "0.11.7"
 serde_derive    = "1.0.147"
 sha1            = "0.10.5"
 thiserror       = "1.0.37"
+reqwest         = "0.11.13"
 bencode         = {version = "0.1.0", path = "../bencode"}
 crossbeam       = "0.8.2"
-hyper           = "0.14.15"
 chrono          = "0.4.23"
+hex             = "0.4.3"
 
 [dev-dependencies]
 hex-literal = "0.3.4"

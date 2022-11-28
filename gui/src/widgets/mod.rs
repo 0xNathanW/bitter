@@ -1,6 +1,11 @@
 use std::collections::BTreeSet;
 
 pub mod info;
+// TODO
+// PROGRESS
+// PEERS
+// TRACKERS
+// FILES
 
 #[derive(Default)]
 pub struct Widgets {

@@ -176,6 +176,14 @@ impl Torrent {
     
     pub fn is_multi_file(&self) -> bool { self.info.files.is_some() }
 
+    pub fn size(&self) -> u64 {
+        if let Some(files) = &self.info.files {
+            files.iter().map(|f| f.length as u64).sum()
+        } else {
+            self.info.length.unwrap_or(0) as u64
+        }
+    }
+
     pub fn size_fmt(&self) -> String {
         if self.is_multi_file() {
             let size = self.info.files.as_ref().unwrap().iter()
@@ -260,8 +268,6 @@ mod test {
         assert_eq!(torrent.info_hash[..], hex!("bd00ed1cf18e575a5cb829d4349bceed34d76833"));
         assert_eq!(torrent.is_private(), true);
         assert_eq!(torrent.creation_date_fmt(), Some("2019-06-11 06:51:42".to_string()));
-    
-        println!("{:?}", torrent);
     }
 
 }

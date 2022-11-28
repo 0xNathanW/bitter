@@ -15,6 +15,7 @@ impl Widget for TorrentInfo {
     fn display(&mut self, ctx: &egui::Context, open: &mut bool) {
         egui::Window::new(self.name())
             .open(open)
+            .vscroll(true)
             .show(ctx, |ui| {
                 
                 CollapsingHeader::new("Announce")
@@ -26,7 +27,7 @@ impl Widget for TorrentInfo {
                     .show(ui, |ui| {
                         if let Some(list) = self.0.announce_list() {
                             for (i, announce) in list.iter().enumerate() {
-                                ui.label(announce);
+                                ui.label(format!("#{}: {}", i, announce));
                             }
                         } else {
                             ui.label("None");
@@ -71,29 +72,34 @@ impl Widget for TorrentInfo {
 
                 CollapsingHeader::new("Info Hash")
                     .show(ui, |ui| {
-                        ui.label(hex::encode(self.0.info_hash()));
-                    });
+                        ui.label(format!("0x{}" ,hex::encode(self.0.info_hash())));
+                    }).header_response
+                        .on_hover_text("The info hash is the SHA1 hash of the bencoded form of the info dictionary.");
                 
-
                 CollapsingHeader::new("Info")
                     .show(ui, |ui| {
                     
-                        CollapsingHeader::new("Piece Length")
+                        CollapsingHeader::new("Name")
                             .show(ui, |ui| {
-                                ui.label(self.0.piece_length().to_string());
+                                ui.label(self.0.name());
                             });
                         
+                        CollapsingHeader::new("Piece Length")
+                        .show(ui, |ui| {
+                            ui.label(format!("{} bytes", self.0.piece_length().to_string()));
+                        });
+                    
                         CollapsingHeader::new("Pieces")
                             .show(ui, |ui| {
-                                let width = self.0.num_pieces().to_string().len();
-                                ui.vertical(|ui| {
+                                let width = self.0.num_pieces().to_string().len() + 1;
+
+                                egui::containers::ScrollArea::new([false, true]).show(ui, |ui| {
                                     for (i, piece) in self.0.pieces_iter().enumerate() {
-                                        ui.horizontal(|ui| {
-                                            ui.label(format!("{:0width$}{hash}", i, width = width, hash = hex::encode(piece)));
-                                        });
+                                        ui.label(format!("{i:width$} : 0x{}", hex::encode(piece)));
                                     }
                                 });
-                            });
+                            }).header_response
+                                .on_hover_text("The SHA1 hash of each piece in the torrent.");
                         
                         CollapsingHeader::new("Private")
                             .show(ui, |ui| {
@@ -105,11 +111,6 @@ impl Widget for TorrentInfo {
                                 ui.label(self.0.size_fmt().to_string());
                             });
                             
-                        CollapsingHeader::new("Name")
-                            .show(ui, |ui| {
-                                ui.label(self.0.name());
-                            });
-                        
                         // If single file.
                         if !self.0.is_multi_file() {
 
@@ -148,7 +149,6 @@ impl Widget for TorrentInfo {
                             }  
 
                         }
-                        
                     });
             });
     }

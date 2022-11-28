@@ -26,7 +26,6 @@ impl eframe::App for Gui {
         }
         
         self.widgets.display(ctx, frame);
-
     }
 }
 
