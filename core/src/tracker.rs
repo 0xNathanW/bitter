@@ -1,14 +1,12 @@
-use std::{io, time};
+use std::time;
+use serde::de::DeserializeOwned;
 use serde_derive::{Serialize, Deserialize};
-use reqwest::{Client, Url};
+use reqwest::Client;
 use super::torrent;
 
 const PORT : u16 = 6881;
 
-enum TrackerError {
-    IoError(io::Error),
-    ParseError,
-}
+type Result<T> = std::result::Result<T, reqwest::Error>;
 
 pub struct Tracker {
     announce:   String,
@@ -29,6 +27,7 @@ impl Tracker {
     pub fn new(torrent: &torrent::Torrent) -> Tracker {
         Tracker {
             announce:   torrent.announce().to_string(),
+            id:         "".to_string(),
             client:     Client::new(),
             params:     RequestParams::new(torrent),
             interval:   None,
@@ -36,9 +35,15 @@ impl Tracker {
         }
     }
 
-    pub async fn get_peers(&self) -> String {
-        let url = Url::parse_with_params(&self.announce, &self.params).unwrap();
-        
+    pub async fn get_peers(&self) -> Result<String> {
+        let raw_resp = self.client.get(&self.announce)
+            .query(&self.params)
+            .send()
+            .await?
+            .text()
+            .await?;
+
+        let resp = bencode::decode_str(&raw_resp)?;
         "test".to_string()
     }
 }
@@ -63,23 +68,62 @@ pub struct RequestParams {
 
 impl RequestParams {
 
-    pub fn new(torrent: &torrent::Torrent) -> RequestParams {
+    fn new(torrent: &torrent::Torrent) -> RequestParams {
         RequestParams {
-            info_hash: hex::encode(torrent.info_hash()),
-            peer_id: "-RS0133-".to_string(),
-            port: PORT,
-            uploaded: 0,
+            info_hash:  hex::encode(torrent.info_hash()),
+            peer_id:    "-RS0133-".to_string(),
+            port:       PORT,
+            uploaded:   0,
             downloaded: 0,
-            left: torrent.size(),
-            compact: 1,
+            left:       torrent.size(),
+            compact:    1,
         }
     }
 }
 
 #[derive(Deserialize)]
-pub struct TrackerResponse {
-    // 
+struct TrackerResponse<P> {
+    // If present, then no other keys may be present. 
+    // The value is a human-readable error message as to why the request failed (string).
+    #[serde(rename = "failure reason")]
+    failure_reason: Option<String>,
+
+    // (new, optional) Similar to failure reason, but the response still gets processed normally. 
+    // The warning message is shown just like an error.
+    #[serde(rename = "warning message")]
+    warning_message: Option<String>,
+
+    // Interval in seconds that the client should wait between sending regular requests to the tracker
+    interval: Option<u64>,
+
+    // Minimum announce interval. If present clients must not reannounce more frequently than this.
+    #[serde(rename = "min interval")]
+    min_interval: Option<u64>,
+
+    // A string that the client should send back on its next announcements.
+    #[serde(rename = "tracker id")]
+    tracker_id: Option<String>,
+
+    // Number of peers with the entire file, i.e. seeders (integer)
+    complete: Option<u64>,
+
+    // Number of non-seeder peers, aka "leechers" (integer)
+    incomplete: Option<u64>,
+
+    // (dictionary model)
+    peers: Option<P>,
 }
+
+#[derive(Deserialize)]
+struct Peer {
+    // Peer's self-selected ID (string)
+    peer_id: String,
+    // The IP address of the peer (string)
+    ip: String,
+    // The port number of the peer (integer)
+    port: u16,
+}
+
 
 #[cfg(test)]
 mod tests {
