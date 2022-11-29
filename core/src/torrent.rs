@@ -1,5 +1,4 @@
 use std::{path::Path, fs::read};
-
 use serde_derive::{Deserialize, Serialize};
 use sha1::{Sha1, Digest};
 use bencode::{decode_bytes, encode_to_raw};
@@ -161,6 +160,10 @@ impl Torrent {
     }
 
     pub fn info_hash(&self) -> &[u8; 20] { &self.info_hash }
+
+    pub fn info_hash_hex(&self) -> String {
+        hex::encode(&self.info_hash)
+    }
 
     pub fn encoding(&self) -> Option<&str> { self.encoding.as_deref() }
 

@@ -1,3 +1,5 @@
+#![allow(dead_code, unused_imports)]
+
 use thiserror::Error;
 
 pub mod torrent;

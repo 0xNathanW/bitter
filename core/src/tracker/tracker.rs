@@ -1,9 +1,8 @@
 use std::time;
+use reqwest::Client;
 
 use crate::torrent;
-use reqwest::Client;
 use super::http_comms::{RequestParams, TrackerResponse};
-
 
 pub struct Tracker {
     announce:   String,

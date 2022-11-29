@@ -1,4 +1,5 @@
 use serde_derive::{Deserialize, Serialize};
+use urlencoding::encode_binary;
 
 use crate::torrent;
 use super::PORT;
@@ -27,8 +28,8 @@ impl RequestParams {
 
     pub fn new(torrent: &torrent::Torrent) -> RequestParams {
         RequestParams {
-            info_hash:  hex::encode(torrent.info_hash()),
-            peer_id:    "-RS0133-".to_string(),
+            info_hash:  encode_binary(torrent.info_hash()).to_string(),
+            peer_id:    encode_binary(b"-RS0133-73b3b0b0b0b0").to_string(),
             port:       PORT,
             uploaded:   0,
             downloaded: 0,
@@ -81,13 +82,21 @@ pub struct TrackerResponse<P: ParsePeers> {
 mod tests {
     use super::*;
     use reqwest::Client;
+    use sha1::{Digest, Sha1};
+
+    fn get_hash() -> String {
+        let mut hasher = Sha1::new();
+        hasher.update("test");
+        let result = hasher.finalize();
+        encode_binary(&result).to_string()
+    }
 
     #[test]
-    fn url_parsing() {
+    fn test_parse_request() {
         let announce = "http://tracker.example.com:6969/announce";
         let params = RequestParams {
-            info_hash:  "0123456789abcdef0123456789abcdef01234567".to_string(),
-            peer_id:    "0123456789abcdef0123456789abcdef01234567".to_string(),
+            info_hash:  get_hash(),
+            peer_id:    encode_binary(b"-RS0133-73b3b0b0b0b0").to_string(),
             port:       PORT,
             uploaded:   0,
             downloaded: 0,
@@ -95,18 +104,33 @@ mod tests {
             compact:    1,
         };
 
-        let url = Client::new()
+        let url: String = Client::new()
             .get(announce)
             .query(&params)
             .build()
             .unwrap()
             .url()
-            .clone();
-        println!("url: {}", url);
+            .clone()
+            .into();
 
-        assert_eq!(url.as_str(), 
-        "http://tracker.example.com:6969/announce?info_hash=%01%23Eg%89%AB%CD%EF%01%23Eg%89%AB%CD%EF%01%23Eg&peer_id=%01%23Eg%89%AB%CD%EF%01%23Eg%89%AB%CD%EF%01%23Eg&port=6881&uploaded=0&downloaded=0&left=0&compact=1"
-    );
+        println!("{}", url);
 
+        assert_eq!(url, 
+            concat!(
+                "http://tracker.example.com:6969/announce",
+                "?info_hash=%25A9J%258F%25E5%25CC%25B1%259B%25A6%251CL%2508s%25D3%2591%25E9%2587%2598%252F%25BB%25D3",
+                "&peer_id=-RS0133-73b3b0b0b0b0",
+                "&port=6881",
+                "&uploaded=0",
+                "&downloaded=0",
+                "&left=0",
+                "&compact=1"
+            )
+        );
+    }
+
+    #[test]
+    fn test_parse_response() {
+            
     }
 }
