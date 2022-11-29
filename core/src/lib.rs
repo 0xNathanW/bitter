@@ -2,6 +2,7 @@ use thiserror::Error;
 
 pub mod torrent;
 pub mod tracker;
+pub mod p2p;
 
 pub type Result<T> = std::result::Result<T, Error>;
 

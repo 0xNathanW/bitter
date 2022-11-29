@@ -1,53 +1,10 @@
-use std::time;
-use serde::de::DeserializeOwned;
-use serde_derive::{Serialize, Deserialize};
-use reqwest::Client;
-use super::torrent;
+use serde_derive::{Deserialize, Serialize};
 
-const PORT : u16 = 6881;
+use crate::torrent;
+use super::PORT;
+use super::peer_parse::ParsePeers;
 
-type Result<T> = std::result::Result<T, reqwest::Error>;
-
-pub struct Tracker {
-    announce:   String,
-    // A string the client should send to the tracker in its next request.
-    id:         String,
-    // http client.
-    client:     Client,
-    // Get request query parameters.
-    params:     RequestParams,
-    // How long client should wait before sending next request.
-    interval:   Option<time::Duration>,
-    // Time of last request.
-    epoch:      time::Instant,
-}
-
-impl Tracker {
-
-    pub fn new(torrent: &torrent::Torrent) -> Tracker {
-        Tracker {
-            announce:   torrent.announce().to_string(),
-            id:         "".to_string(),
-            client:     Client::new(),
-            params:     RequestParams::new(torrent),
-            interval:   None,
-            epoch:      time::Instant::now(),
-        }
-    }
-
-    pub async fn get_peers(&self) -> Result<String> {
-        let raw_resp = self.client.get(&self.announce)
-            .query(&self.params)
-            .send()
-            .await?
-            .text()
-            .await?;
-
-        let resp = bencode::decode_str(&raw_resp)?;
-        "test".to_string()
-    }
-}
-
+// Request params are serialized into a query string.
 #[derive(Serialize)]
 pub struct RequestParams {
     // Hash of info dict.
@@ -68,7 +25,7 @@ pub struct RequestParams {
 
 impl RequestParams {
 
-    fn new(torrent: &torrent::Torrent) -> RequestParams {
+    pub fn new(torrent: &torrent::Torrent) -> RequestParams {
         RequestParams {
             info_hash:  hex::encode(torrent.info_hash()),
             peer_id:    "-RS0133-".to_string(),
@@ -79,10 +36,16 @@ impl RequestParams {
             compact:    1,
         }
     }
+
+    pub fn refresh_params(&mut self, uploaded: u64, downloaded: u64, left: u64) {
+        self.uploaded = uploaded;
+        self.downloaded = downloaded;
+        self.left = left;
+    }
 }
 
 #[derive(Deserialize)]
-struct TrackerResponse<P> {
+pub struct TrackerResponse<P: ParsePeers> {
     // If present, then no other keys may be present. 
     // The value is a human-readable error message as to why the request failed (string).
     #[serde(rename = "failure reason")]
@@ -114,41 +77,36 @@ struct TrackerResponse<P> {
     peers: Option<P>,
 }
 
-#[derive(Deserialize)]
-struct Peer {
-    // Peer's self-selected ID (string)
-    peer_id: String,
-    // The IP address of the peer (string)
-    ip: String,
-    // The port number of the peer (integer)
-    port: u16,
-}
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reqwest::Url;
-    use hex_literal::hex;
+    use reqwest::Client;
 
+    #[test]
     fn url_parsing() {
         let announce = "http://tracker.example.com:6969/announce";
         let params = RequestParams {
-            info_hash:  hex!("0123456789abcdef0123456789abcdef01234567").to_string(),
-            peer_id:    hex!("0123456789abcdef0123456789abcdef01234567").to_string(),
+            info_hash:  "0123456789abcdef0123456789abcdef01234567".to_string(),
+            peer_id:    "0123456789abcdef0123456789abcdef01234567".to_string(),
             port:       PORT,
             uploaded:   0,
             downloaded: 0,
             left:       0,
             compact:    1,
-            event:      "started".to_string(),
         };
 
-        let url = Url::parse_with_params(announce, &params).unwrap();
+        let url = Client::new()
+            .get(announce)
+            .query(&params)
+            .build()
+            .unwrap()
+            .url()
+            .clone();
+        println!("url: {}", url);
+
         assert_eq!(url.as_str(), 
-        "http://tracker.example.com:6969/announce?info_hash=%01%23Eg%89%AB%CD%EF%01%23Eg%89%AB%CD%EF%01%23Eg&peer_id=%01%23Eg%89%AB%CD%EF%01%23Eg%89%AB%CD%EF%01%23Eg&port=6881&uploaded=0&downloaded=0&left=0&compact=1&event=started"
+        "http://tracker.example.com:6969/announce?info_hash=%01%23Eg%89%AB%CD%EF%01%23Eg%89%AB%CD%EF%01%23Eg&peer_id=%01%23Eg%89%AB%CD%EF%01%23Eg%89%AB%CD%EF%01%23Eg&port=6881&uploaded=0&downloaded=0&left=0&compact=1"
     );
 
     }
-
 }
