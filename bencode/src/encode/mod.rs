@@ -19,6 +19,6 @@ pub fn encode_to_str<T: ser::Serialize>(v: &T) -> Result<String> {
     v.serialize(&mut encoder)?;
     match std::str::from_utf8(encoder.as_ref()) {
         Ok(s) => Ok(s.to_string()),
-        Err(_) => Err(Error::InvalidToken("not a utf-8".to_string())),
+        Err(_) => Err(Error::Custom("invalid utf-8 string".to_string())),
     }
 }

@@ -1,17 +1,19 @@
+use serde_bytes::ByteBuf;
 use serde_derive::{Deserialize, Serialize};
 use urlencoding::encode_binary;
 
 use crate::torrent;
 use super::PORT;
-use super::peer_parse::ParsePeers;
+use super::peer_parse::{ParsePeers, PeerInfo};
 
 // Request params are serialized into a query string.
 #[derive(Serialize)]
 pub struct RequestParams {
+    announce:   String,
     // Hash of info dict.
-    info_hash:  String,
+    info_hash:  [u8; 20],
     // Urlencoded 20-byte string used as a unique ID for the client.
-    peer_id:    String,
+    peer_id:    [u8; 20],
     // Port number.
     port:       u16,
     // Total amount uploaded.
@@ -28,8 +30,9 @@ impl RequestParams {
 
     pub fn new(torrent: &torrent::Torrent) -> RequestParams {
         RequestParams {
-            info_hash:  encode_binary(torrent.info_hash()).to_string(),
-            peer_id:    encode_binary(b"-RS0133-73b3b0b0b0b0").to_string(),
+            announce:   torrent.announce().to_string(),
+            info_hash:  torrent.info_hash().clone(),
+            peer_id:    b"-RS0133-73b3b0b0b0b0".to_owned(),
             port:       PORT,
             uploaded:   0,
             downloaded: 0,
@@ -43,60 +46,89 @@ impl RequestParams {
         self.downloaded = downloaded;
         self.left = left;
     }
+
+    pub fn build_url(&self, id: &Option<String>) -> String {
+        let url = format!(
+            "{}?info_hash={}&peer_id={}&port={}&uploaded={}&downloaded={}&left={}&compact={}",
+            self.announce,
+            encode_binary(&self.info_hash),
+            encode_binary(&self.peer_id),
+            self.port,
+            self.uploaded,
+            self.downloaded,
+            self.left,
+            self.compact,
+        );
+
+        if let Some(id) = id {
+            format!("{}&trackerid={}", url, id)
+        } else {
+            url   
+        }
+    }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct TrackerResponse<P: ParsePeers> {
     // If present, then no other keys may be present. 
     // The value is a human-readable error message as to why the request failed (string).
     #[serde(rename = "failure reason")]
-    failure_reason: Option<String>,
+    pub failure_reason: Option<ByteBuf>,
+
+    // Option code for the failure reason (integer).
+    #[serde(rename = "failure code")]
+    pub failure_code: Option<u64>,
 
     // (new, optional) Similar to failure reason, but the response still gets processed normally. 
     // The warning message is shown just like an error.
     #[serde(rename = "warning message")]
-    warning_message: Option<String>,
+    pub warning_message: Option<ByteBuf>,
 
     // Interval in seconds that the client should wait between sending regular requests to the tracker
-    interval: Option<u64>,
+    pub interval: Option<u64>,
 
     // Minimum announce interval. If present clients must not reannounce more frequently than this.
     #[serde(rename = "min interval")]
-    min_interval: Option<u64>,
+    pub min_interval: Option<u64>,
 
     // A string that the client should send back on its next announcements.
     #[serde(rename = "tracker id")]
-    tracker_id: Option<String>,
+    pub tracker_id: Option<ByteBuf>,
 
     // Number of peers with the entire file, i.e. seeders (integer)
-    complete: Option<u64>,
+    pub complete: Option<u64>,
 
     // Number of non-seeder peers, aka "leechers" (integer)
-    incomplete: Option<u64>,
+    pub incomplete: Option<u64>,
 
     // (dictionary model)
-    peers: Option<P>,
+    pub peers: Option<P>,
+}
+
+impl<P: ParsePeers> TrackerResponse<P> {
+    pub fn peers(&self) -> Option<Vec<PeerInfo>> {
+        self.peers.as_ref().map(|p| p.parse_peers())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::peer_parse::BinaryModel;
+    use std::net::{SocketAddrV4, Ipv4Addr};
     use reqwest::Client;
     use sha1::{Digest, Sha1};
-
-    fn get_hash() -> String {
-        let mut hasher = Sha1::new();
-        hasher.update("test");
-        let result = hasher.finalize();
-        encode_binary(&result).to_string()
-    }
+    use urlencoding::{encode, encode_binary};
 
     #[test]
     fn test_parse_request() {
-        let announce = "http://tracker.example.com:6969/announce";
+        let announce = "http://tracker.example.com/announce";
+        let info_hash: [u8; 20] = hex::decode("d8e8fca2dc0f896fd7cb4cb0031ba249b33e213b").unwrap().try_into().unwrap();
+
         let params = RequestParams {
-            info_hash:  get_hash(),
-            peer_id:    encode_binary(b"-RS0133-73b3b0b0b0b0").to_string(),
+            info_hash,
+            announce:   announce.to_string(),
+            peer_id:    b"-RS0133-73b3b0b0b0b0".to_owned(),
             port:       PORT,
             uploaded:   0,
             downloaded: 0,
@@ -105,32 +137,46 @@ mod tests {
         };
 
         let url: String = Client::new()
-            .get(announce)
-            .query(&params)
+            .get(params.build_url(&None))
             .build()
             .unwrap()
             .url()
             .clone()
             .into();
 
-        println!("{}", url);
-
-        assert_eq!(url, 
-            concat!(
-                "http://tracker.example.com:6969/announce",
-                "?info_hash=%25A9J%258F%25E5%25CC%25B1%259B%25A6%251CL%2508s%25D3%2591%25E9%2587%2598%252F%25BB%25D3",
-                "&peer_id=-RS0133-73b3b0b0b0b0",
-                "&port=6881",
-                "&uploaded=0",
-                "&downloaded=0",
-                "&left=0",
-                "&compact=1"
-            )
-        );
+        assert_eq!(url,
+        concat!(
+            "http://tracker.example.com/announce?",
+            "info_hash=%D8%E8%FC%A2%DC%0F%89o%D7%CBL%B0%03%1B%A2I%B3%3E%21%3B",
+            "&peer_id=-RS0133-73b3b0b0b0b0",
+            "&port=6881",
+            "&uploaded=0",
+            "&downloaded=0",
+            "&left=0",
+            "&compact=1",
+        ));   
     }
 
     #[test]
-    fn test_parse_response() {
-            
+    fn test_parse_response_binary() {
+        let s = "64383a636f6d706c65746569396531303a696e636f6d706c657465693165383a696e74657276616c69313830306531323a6d696e20696e74657276616c693138303065353a706565727336303a52454d051ae1ca2f2a2ec00884937726decc61759ab8138851ab05e8f6bb5062f69770469247493ad4d005879f2ec8d54237ce44ea6043db8806c8d565";
+        let raw = hex::decode(s).unwrap();
+
+        let response: TrackerResponse<BinaryModel> = bencode::decode_bytes(&raw).unwrap();        
+        assert_eq!(response.interval, Some(1800));
+        assert_eq!(response.min_interval, Some(1800));
+        assert_eq!(response.complete, Some(9));
+        assert_eq!(response.incomplete, Some(1));
+
+        let peers = response.peers.unwrap().parse_peers();
+        assert!(peers.contains(&PeerInfo {
+            addr: SocketAddrV4::new(Ipv4Addr::new(97, 117, 154, 184), 5000),
+            id:   None,
+        }));
+
+        assert!(peers.contains(&PeerInfo {
+            addr: SocketAddrV4::new(Ipv4Addr::new(5, 135, 159, 46), 51413),
+            id:   None,
+        }));
     }
 }

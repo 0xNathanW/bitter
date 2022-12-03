@@ -70,7 +70,9 @@ impl<'a> ser::SerializeMap for SerializeMap<'a> {
     {
         let key = self.current_key.take().ok_or_else(
             || { 
-                Error::InvalidToken("attempted to serialize a value without a key".to_string()) 
+                Error::MapSerializationOrder(
+                    "consecutive calls to serialize value without serializing key".to_string()
+                )
             }
         )?;
 

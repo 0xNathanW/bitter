@@ -1,32 +1,35 @@
-use std::fmt::{Display, self};
-use std::error::Error as StdError;
+use std::fmt::{Display};
 use std::result::Result as StdResult;
 
 use serde::{ser, de};
+use thiserror::Error;
 
 pub type Result<T> = StdResult<T, Error>;
 
 // Errors specific to bencoding on top of those present in serde.
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
+    #[error(transparent)]
     IoError(std::io::Error),
 
     // Attempted to deserialize an invalid type.
+    #[error("Invalid type: {0}")]
     InvalidType(String),
 
     // Type valid but unexpected token.
-    InvalidToken(String),
+    #[error("Invalid token: expected: {expected:?}, found: {found:?}")]    
+    InvalidToken {
+        expected: String,
+        found: String,
+    },
 
-    // Struct has an unknown field.
-    UnknownField(String),
-
-    // Struct field expected but missing.
-    MissingField(String),
-
+    #[error("Map serialization error: {0}")]
     MapSerializationOrder(String),
 
+    #[error("{0}")]
     Custom(String),
 
+    #[error("Expected end of input stream")]
     EOF,
 }
 
@@ -39,30 +42,5 @@ impl ser::Error for Error {
 impl de::Error for Error {
     fn custom<T>(msg:T) -> Self where T:Display {
         Error::Custom(msg.to_string())
-    }
-}
-
-impl StdError for Error {
-    fn source(&self) -> Option<&(dyn StdError + 'static)> {
-        match self {
-            Error::IoError(err) => Some(err),
-            _ => None,
-        }
-    }
-}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let error_msg = match &self {
-            Error::IoError(err) => return err.fmt(f),
-            Error::InvalidType(s)           => s,
-            Error::InvalidToken(s)          => s,
-            Error::MissingField(s)          => s,
-            Error::UnknownField(s)          => s,
-            Error::Custom(s)                => s,
-            Error::MapSerializationOrder(s) => s,
-            Error::EOF                               => "end of stream"
-        };
-        f.write_str(error_msg)
     }
 }

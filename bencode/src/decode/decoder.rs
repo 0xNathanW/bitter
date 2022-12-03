@@ -34,9 +34,7 @@ impl<'de, R: Read> Decoder<R> {
             b'l' => Ok(DecodedType::List),
             b'd' => Ok(DecodedType::Dictionary),
             b'e' => Ok(DecodedType::EOF),
-            d => Err(Error::InvalidToken(
-                format!("invalid token: {}", d as char)
-            )),
+            e => Err(Error::InvalidToken { expected: "a valid token type".to_string(), found: (e as char).to_string() }),
         }
     }
 
@@ -52,12 +50,15 @@ impl<'de, R: Read> Decoder<R> {
             }
             // Signals end of integer.
             if buf[0] == b'e' {
-                let length_str = String::from_utf8(out).map_err(|_| Error::InvalidToken(
-                        "attempted to convert non UTF_8 int to string during deserialization".to_string()
-                    ))?;
-                let length_int = length_str.parse().map_err(|_| Error::InvalidToken(
+                
+                let length_str = String::from_utf8(out).map_err(|err| Error::Custom(
+                    format!("Failed to convert bytes to UTF-8 string: {}", err)                    
+                ))?;
+                
+                let length_int = length_str.parse().map_err(|_| Error::Custom(
                     format!("cannot parse {} into int", length_str)
                 ))?;
+
                 return Ok(length_int);
             // Otherwise continue.
             } else {
@@ -76,12 +77,15 @@ impl<'de, R: Read> Decoder<R> {
                 return Err(Error::EOF);
             }
             if buf[0] == b':' {
-                let length_str = String::from_utf8(out).map_err(|_| Error::InvalidToken(
-                    "attempted to convert non UTF_8 int to string during deserialization".to_string()
+
+                let length_str = String::from_utf8(out).map_err(|err| Error::Custom(
+                    format!("Failed to convert bytes to UTF-8 string: {}", err)                    
                 ))?;
-                let length_int = length_str.parse().map_err(|_| Error::InvalidToken(
+                
+                let length_int = length_str.parse().map_err(|_| Error::Custom(
                     format!("cannot parse {} into int", length_str)
                 ))?;
+
                 return Ok(length_int);
             } else {
                 out.push(buf[0]);
@@ -162,12 +166,12 @@ impl<'de, 'a, R: Read> Deserializer<'de> for &'a mut Decoder<R> {
         let b = self.read_next().and_then(
             |x| match x {
                 DecodedType::ByteString(a) => Ok(a),
-                _ => Err(Error::InvalidToken("expected bytes".to_string())),
+                _ => Err(Error::InvalidToken { expected: "b for byte string".to_string(), found: format!("{:?}", x) }),
             }
         )?;
 
         let s = std::str::from_utf8(&b).map_err(
-            |_| Error::InvalidToken("expected bytes".to_string()),
+            |err| Error::Custom(format!("Failed to convert bytes to UTF-8 string: {}", err))
         )?;
         visitor.visit_str(s)
     }
@@ -184,7 +188,7 @@ impl<'de, 'a, R: Read> Deserializer<'de> for &'a mut Decoder<R> {
         self.read_next().and_then(
             |x| match x {
                 DecodedType::List => Ok(()),
-                _ => Err(Error::InvalidToken("expected list".to_string())),
+                _ => Err(Error::InvalidToken { expected: "l for list".to_string(), found: format!("{:?}", x) }),
             }
         )?;
         visitor.visit_seq(Access::new(self, Some(len)))

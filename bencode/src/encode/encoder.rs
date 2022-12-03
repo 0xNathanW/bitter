@@ -83,11 +83,11 @@ impl<'a> Serializer for &'a mut Encoder {
     }
 
     fn serialize_f32(self, _: f32) -> Result<()> {
-        Err(Error::InvalidType("cannot serialize type f32".to_string()))
+        Err(Error::InvalidType("f32".to_string()))
     }
 
     fn serialize_f64(self, _: f64) -> Result<()> {
-        Err(Error::InvalidType("cannot serialize type f64".to_string()))
+        Err(Error::InvalidType("f64".to_string()))
     }
 
     // A byte string (a sequence of bytes, not necessarily characters) is encoded as <length>:<contents>. The length is 

@@ -13,4 +13,4 @@ pub use decode::{decode_bytes, decode_str};
 // For T -> bencode
 pub use encode::{encode_to_raw, encode_to_str};
 
-pub use error::Error;
+pub use error::{Error, Result};

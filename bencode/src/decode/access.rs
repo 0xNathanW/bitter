@@ -72,10 +72,9 @@ impl<'de, 'a, R: Read> de::VariantAccess<'de> for Access<'a, R> {
         where T: de::DeserializeSeed<'de>
     {
         let out = seed.deserialize(&mut *self.d)?;
-        if self.d.read_next()? != DecodedType::EOF {
-            Err(Error::InvalidToken("expected e token".to_string()))
-        } else {
-            Ok(out)
+        match self.d.read_next()? {
+            DecodedType::EOF => Ok(out),
+            e => Err(Error::InvalidToken{ expected: "e for end".to_string(), found: format!("{:?}", e) }),
         }
     }
 
@@ -84,12 +83,11 @@ impl<'de, 'a, R: Read> de::VariantAccess<'de> for Access<'a, R> {
     {
         let out = match self.d.read_next()? {
             DecodedType::List => visitor.visit_seq(Access::new(&mut *self.d, Some(len)))?,
-            _ => return Err(Error::InvalidToken("expected list".to_string())),
+            e => return Err(Error::InvalidToken{ expected: "l for list".to_string(), found: format!("{:?}", e) }),
         };
-        if self.d.read_next()? != DecodedType::EOF {
-            Err(Error::InvalidToken("expected e token".to_string()))
-        } else {
-            Ok(out)
+        match self.d.read_next()? {
+            DecodedType::EOF => Ok(out),
+            e => Err(Error::InvalidToken{ expected: "e for end".to_string(), found: format!("{:?}", e) }),
         }
     }
 
@@ -101,12 +99,10 @@ impl<'de, 'a, R: Read> de::VariantAccess<'de> for Access<'a, R> {
         where V: de::Visitor<'de> 
     {
         let out = Deserializer::deserialize_any(&mut *self.d, visitor)?;
-        if self.d.read_next()? != DecodedType::EOF {
-            Err(Error::InvalidToken("expected e token".to_string()))
-        } else {
-            Ok(out)
+        match self.d.read_next()? {
+            DecodedType::EOF => Ok(out),
+            e => Err(Error::InvalidToken{ expected: "e for end".to_string(), found: format!("{:?}", e) }),
         }
-
     }
 }
 
@@ -126,9 +122,7 @@ impl<'de, 'a, R: Read> de::EnumAccess<'de> for Access<'a, R> {
             
             DecodedType::Dictionary => Ok((seed.deserialize(&mut *self.d)?, self)),
             
-            e => Err(Error::InvalidToken(
-                format!("expected bytes/map, got {:?}", e)
-            )),
+            e => Err(Error::InvalidToken{ expected: "b for bytes or d for dict".to_string(), found: format!("{:?}", e) }),
         }
     }
 }

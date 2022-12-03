@@ -23,7 +23,7 @@ pub struct File {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct Info {
 
     // File name
@@ -65,7 +65,7 @@ pub struct Info {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 pub struct Torrent {
     
     // The announce URL of the tracker (string)
