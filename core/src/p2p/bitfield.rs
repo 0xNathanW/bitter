@@ -4,6 +4,7 @@ The high bit in the first byte corresponds to piece index 0.
 Bits that are cleared indicated a missing piece, and set bits indicate a valid and available piece.
 Spare bits at the end are set to zero.*/
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Bitfield(pub Vec<u8>);
 
 impl Bitfield {

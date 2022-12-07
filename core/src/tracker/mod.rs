@@ -5,6 +5,7 @@ const PORT: u16 = 6881;
 mod peer_parse;
 mod http_comms;
 pub mod tracker;
+pub use tracker::Tracker;
 pub use peer_parse::PeerInfo;
 
 pub type Result<T> = std::result::Result<T, Error>;
