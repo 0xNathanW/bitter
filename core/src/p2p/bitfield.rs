@@ -1,8 +1,12 @@
-/*The bitfield message is variable length, where X is the length of the bitfield.
+use super::{Result, Error};
+use super::message::Message;
+use super::peer::Peer;
+
+/* The bitfield message is variable length, where X is the length of the bitfield.
 The payload is a bitfield representing the pieces that have been successfully downloaded.
 The high bit in the first byte corresponds to piece index 0.
 Bits that are cleared indicated a missing piece, and set bits indicate a valid and available piece.
-Spare bits at the end are set to zero.*/
+Spare bits at the end are set to zero. */
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Bitfield(pub Vec<u8>);
@@ -38,10 +42,45 @@ impl From<Vec<u8>> for Bitfield {
     }
 }
 
+impl Peer {
+    // The message immediately following a handshake is a bitfield message.
+    pub async fn build_bitfield(&mut self) -> Result<()> {
+        let msg = self.recv().await?;
+        match msg {
+            Message::Bitfield { bitfield } => {
+                self.set_bitfield(bitfield);
+            },
+            // Peers can also send have messages to indicate which pieces they have.
+            Message::Have { idx } => {
+                self.set_piece(idx as usize);
+                while let Ok(msg) = self.recv().await {
+                    match msg {
+                        Message::Have { idx } => {
+                            self.set_piece(idx as usize);
+                        },
+                        Message::Bitfield { bitfield } => {
+                            self.set_bitfield(bitfield);
+                            break;
+                        },
+                        Message::Unchoke => {
+                            self.choked = false;
+                            break;
+                        },
+                        _ => { return Err(Error::InvalidMessage("Bitfield/Have".to_string(), msg.fmt_short())) },
+                    }
+                }
+            },
+            _ => { return Err(Error::InvalidMessage("Bitfield/Have".to_string(), msg.fmt_short())) },
+        }
+        Ok(())
+    }
+
+}
+
+
 #[cfg(test)]
 mod tests {
     use sha1::digest::typenum::bit;
-
     use super::*;
 
     #[test]

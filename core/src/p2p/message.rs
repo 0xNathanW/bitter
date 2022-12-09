@@ -148,6 +148,38 @@ impl Message {
             _ => Err(Error::InvalidMessageID(buf[0])),
         }
     }
+
+    pub fn fmt_short(&self) -> String {
+        match self {
+            Message::KeepAlive            => "KeepAlive".to_string(),
+            Message::Choke                => "Choke".to_string(),
+            Message::Unchoke              => "Unchoke".to_string(),
+            Message::Interested           => "Interested".to_string(),
+            Message::NotInterested        => "NotInterested".to_string(),
+            Message::Have { idx }   => format!("Have({})", idx),
+            Message::Bitfield { .. }      => "Bitfield".to_string(),
+            Message::Request { .. }       => "Request".to_string(),
+            Message::Piece { .. }         => "Piece".to_string(),
+            Message::Cancel { .. }        => "Cancel".to_string(),
+            Message::Port { port }  => format!("Port({})", port),
+        }
+    }
+
+    pub fn fmt_long(&self) -> String {
+        match self {
+            Message::KeepAlive            => "KeepAlive".to_string(),
+            Message::Choke                => "Choke".to_string(),
+            Message::Unchoke              => "Unchoke".to_string(),
+            Message::Interested           => "Interested".to_string(),
+            Message::NotInterested        => "NotInterested".to_string(),
+            Message::Have { idx }   => format!("Have({})", idx),
+            Message::Bitfield { bitfield: _ }                     => format!("Bitfield"),
+            Message::Request { idx, begin, length }     => format!("Request(idx: {}, begin: {}, length: {})", idx, begin, length),
+            Message::Piece { idx, begin, block }    => format!("Piece(idx: {}, begin: {}, length: {})", idx, begin, block.len()),
+            Message::Cancel { idx, begin, length }      => format!("Cancel(idx: {}, begin: {}, length: {})", idx, begin, length),
+            Message::Port { port }  => format!("Port({})", port),
+        }
+    }
 }
 
 #[cfg(test)]

@@ -3,6 +3,7 @@
 use thiserror::Error;
 
 pub mod torrent;
+pub mod piece;
 pub mod tracker;
 pub mod p2p;
 

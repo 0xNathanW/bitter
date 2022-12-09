@@ -1,6 +1,7 @@
 use std::net::{SocketAddrV4, Ipv4Addr};
 use tokio::net::TcpStream;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::sync::mpsc;
 
 use super::message::Message;
 use super::{Result, Error};
@@ -18,6 +19,8 @@ pub struct Peer {
     pub interested:         bool,
     pub peer_choking:       bool,
     pub peer_interested:    bool,
+
+    display_chan: Option<mpsc::Sender<String>>,
 }
 
 impl Default for Peer {
@@ -31,23 +34,42 @@ impl Default for Peer {
             interested:         false,
             peer_choking:       true,
             peer_interested:    false,
+            display_chan:       None,
         }
     }
 }
 
-pub async fn connect(ip: SocketAddrV4, id: Option<String>, info_hash: [u8; 20]) -> Result<Peer> {
-
-    let stream = TcpStream::connect(ip).await?;
-    Ok(Peer {
-        stream: Some(stream),
-        ..Default::default()
-    })
-
-}
-
 impl Peer {
 
-    pub async fn exchange_handshake(&mut self, info_hash: [u8; 20], id: [u8; 20]) -> Result<()> {
+    pub fn new(id: Option<String>, addr: SocketAddrV4) -> Self {
+        Self {
+            id,
+            addr,
+            ..Default::default()
+        }
+    }
+
+    pub async fn connect(
+        &mut self, 
+        info_hash: [u8; 20], 
+        id: [u8; 20],
+        display_chan: Option<mpsc::Sender<String>>,
+    ) -> Result<()> {
+        let stream = TcpStream::connect(self.addr).await?;
+        self.stream = Some(stream);
+        self.display_chan = display_chan;
+        self.exchange_handshake(info_hash, id).await?;
+        self.build_bitfield().await?;
+        Ok(())
+    }
+
+    pub async fn disconnect(&mut self) {
+        if let Some(stream) = &mut self.stream {
+            stream.shutdown().await.ok();
+        }
+    }
+
+    async fn exchange_handshake(&mut self, info_hash: [u8; 20], id: [u8; 20]) -> Result<()> {
         
         let msg = handshake(info_hash, id);
         if let Some(stream) = &mut self.stream {
@@ -90,5 +112,39 @@ impl Peer {
         } else {
             Err(Error::NoStream)
         }
+    }
+
+    pub fn set_bitfield(&mut self, bitfield: Bitfield) {
+        self.bitfield = bitfield;
+    }
+
+    pub fn has_piece(&self, idx: usize) -> bool {
+        self.bitfield.has_piece(idx)
+    }
+
+    pub fn set_piece(&mut self, idx: usize) {
+        self.bitfield.set_piece(idx);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tracker::PeerInfo;
+    use std::net::{SocketAddrV4, Ipv4Addr};
+    use rand::Rng;
+
+    #[tokio::test] 
+    async fn test_peer () {
+        let info_hash = [189, 0, 237, 28, 241, 142, 87, 90, 92, 184, 41, 212, 52, 155, 206, 237, 52, 215, 104, 51];
+        let id = rand::thread_rng().gen::<[u8; 20]>();
+        // Abitrary real peer.
+        let info = PeerInfo {
+            id: None,
+            addr: SocketAddrV4::new(Ipv4Addr::new(81, 171, 5, 232), 63163),
+        };
+
+        let mut peer = Peer::new(None, info.addr);
+        peer.connect(info_hash, id, None).await.unwrap();
     }
 }

@@ -167,7 +167,7 @@ impl Torrent {
 
     pub fn encoding(&self) -> Option<&str> { self.encoding.as_deref() }
 
-    pub fn piece_length(&self) -> i64 { self.info.piece_length }
+    pub fn piece_length(&self) -> u64 { self.info.piece_length as u64 }
 
     pub fn pieces_iter(&self) -> impl Iterator<Item = &[u8]> {
         self.info.pieces.chunks(20)
