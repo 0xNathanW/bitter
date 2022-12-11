@@ -17,22 +17,22 @@ impl Bitfield {
         Self(vec![0; size])
     }
 
-    pub fn has_piece(&self, idx: usize) -> bool {
-        if idx >= self.0.len() * 8 {
+    pub fn has_piece(&self, idx: u32) -> bool {
+        if idx >= (self.0.len() * 8) as u32 {
             return false;
         }
-        let byte = self.0[idx / 8];
+        let byte = self.0[(idx / 8) as usize];
         let bit = 7 - (idx % 8);
         byte & (1 << bit) != 0
     }
 
-    pub fn set_piece(&mut self, idx: usize) {
-        if idx >= self.0.len() * 8 {
+    pub fn set_piece(&mut self, idx: u32) {
+        if idx >= (self.0.len() * 8) as u32 {
             return;
         }
         let byte = idx / 8;
         let bit = 7 - (idx % 8);
-        self.0[byte] |= 1 << bit;
+        self.0[byte as usize] |= 1 << bit;
     }
 }
 
@@ -52,11 +52,11 @@ impl Peer {
             },
             // Peers can also send have messages to indicate which pieces they have.
             Message::Have { idx } => {
-                self.set_piece(idx as usize);
+                self.set_piece(idx);
                 while let Ok(msg) = self.recv().await {
                     match msg {
                         Message::Have { idx } => {
-                            self.set_piece(idx as usize);
+                            self.set_piece(idx);
                         },
                         Message::Bitfield { bitfield } => {
                             self.set_bitfield(bitfield);
@@ -80,7 +80,6 @@ impl Peer {
 
 #[cfg(test)]
 mod tests {
-    use sha1::digest::typenum::bit;
     use super::*;
 
     #[test]

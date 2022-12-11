@@ -1,16 +1,17 @@
 use thiserror::Error;
+use crate::piece;
 
 pub mod peer;
 mod bitfield;
 mod message;
 mod handshake;
 mod manage;
+mod request;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Error, Debug)]
 pub enum Error {
-    
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
@@ -25,6 +26,12 @@ pub enum Error {
 
     #[error("Invalid message recieved: expected {0}, got {1}")]
     InvalidMessage(String, String),
+
+    #[error(transparent)]
+    PieceError(#[from] piece::Error),
+
+    #[error("Peer choked: unable to send requests")]
+    Choke,
 }
 
 use crate::tracker::PeerInfo;

@@ -49,6 +49,7 @@ impl Peer {
         }
     }
 
+    // Involves everything up to the point where we start trading pieces.
     pub async fn connect(
         &mut self, 
         info_hash: [u8; 20], 
@@ -118,12 +119,16 @@ impl Peer {
         self.bitfield = bitfield;
     }
 
-    pub fn has_piece(&self, idx: usize) -> bool {
+    pub fn has_piece(&self, idx: u32) -> bool {
         self.bitfield.has_piece(idx)
     }
 
-    pub fn set_piece(&mut self, idx: usize) {
+    pub fn set_piece(&mut self, idx: u32) {
         self.bitfield.set_piece(idx);
+    }
+
+    pub fn new_port(&mut self, port: u16) {
+        todo!()
     }
 }
 
