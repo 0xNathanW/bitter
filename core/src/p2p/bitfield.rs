@@ -45,33 +45,23 @@ impl From<Vec<u8>> for Bitfield {
 impl Peer {
     // The message immediately following a handshake is a bitfield message.
     pub async fn build_bitfield(&mut self) -> Result<()> {
-        let msg = self.recv().await?;
-        match msg {
-            Message::Bitfield { bitfield } => {
-                self.set_bitfield(bitfield);
-            },
-            // Peers can also send have messages to indicate which pieces they have.
-            Message::Have { idx } => {
-                self.set_piece(idx);
-                while let Ok(msg) = self.recv().await {
-                    match msg {
-                        Message::Have { idx } => {
-                            self.set_piece(idx);
-                        },
-                        Message::Bitfield { bitfield } => {
-                            self.set_bitfield(bitfield);
-                            break;
-                        },
-                        Message::Unchoke => {
-                            self.peer_choking = false;
-                            break;
-                        },
-                        _ => { return Err(Error::InvalidMessage("Bitfield/Have".to_string(), msg.fmt_short())) },
-                    }
+        let mut recieved_bitfiled = false;
+        while let Ok(msg) = self.recv().await {
+            match msg {
+                Message::Bitfield { bitfield } => {
+                },
+                Message::Have(idx) => {
+                    self.bitfield.set_piece(idx);
+                },
+                _ => {
+                    return Err(Error::UnexpectedMessage(msg));
                 }
-            },
-            _ => { return Err(Error::InvalidMessage("Bitfield/Have".to_string(), msg.fmt_short())) },
+            }
+            if bitfields_n > 1 {
+                return Err(Error::TooManyBitfields);
+            }
         }
+        
         Ok(())
     }
 
