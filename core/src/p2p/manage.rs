@@ -1,11 +1,12 @@
+use std::fs;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 
-use crate::piece::{PieceWorkQueue, Piece, self};
+use crate::piece::{PieceWorkQueue, Piece, PieceData, self};
 use super::{Result, Error};
 use super::peer::Peer;
 use super::message::Message;
-use super::request::Request;
+use super::request::{Request, Action};
 
 const BLOCK_LEN: u32 = 16384; // 16Kb
 
@@ -14,9 +15,13 @@ impl Peer {
     pub async fn trade_pieces(
         &mut self,       
         workload: PieceWorkQueue,
-        fs_out: mpsc::Sender<String>,
+        fs_out: mpsc::Sender<PieceData>,
         requests: mpsc::Sender<Request>,
     ) -> Result<()> {
+
+        // Communicate desire to download pieces.
+        self.send(Message::Interested).await?;
+        
 
         while let Some(piece) = workload.next().await {
             if !self.has_piece(piece.idx) {
@@ -24,7 +29,10 @@ impl Peer {
                 continue;
             }
 
-
+            if self.download_piece(&piece, &requests, &fs_out).await.is_err() {
+                workload.push(piece).await;
+                continue;
+            }
         }
 
         Ok(())
@@ -33,7 +41,12 @@ impl Peer {
     // Pieces are too long to request in one go.
 	// We will request a piece in chunks of 16384 bytes (16Kb) called blocks.
 	// The last block will likely be smaller.
-    pub async fn download_piece(&mut self, piece: Piece, requests: mpsc::Sender<Request>) -> Result<()> {
+    pub async fn download_piece(
+        &mut self, 
+        piece: &Piece, 
+        requests: &mpsc::Sender<Request>,
+        fs_out: &mpsc::Sender<PieceData>,
+    ) -> Result<()> {
 
         let piece_len: u32 = piece.end - piece.begin;
         let mut piece_data = Vec::<u8>::with_capacity(piece_len as usize);
@@ -59,21 +72,19 @@ impl Peer {
 
         // Read responses containing block.
         while downloaded < piece_len {
+
+            if self.peer_choking {
+                // Attempt unchoke.
+                self.send(Message::Interested).await?;
+                let msg = self.recv().await?;
+                match msg {
+                    Message::Unchoke => self.peer_choking = false,
+                    _ => return Err(Error::Choke),
+                }
+            }
+
             let msg = self.recv().await?;
             match msg {
-                Message::KeepAlive => {},
-
-                Message::Choke => {
-                    self.choked = true;
-                    return Err(Error::Choke);
-                }
-                Message::Unchoke => self.choked = false,
-
-                Message::Bitfield { bitfield } => self.set_bitfield(bitfield),
-                Message::Have { idx } => self.set_piece(idx),
-
-                Message::Interested => self.interested = true,
-                Message::NotInterested => self.interested = false,
 
                 Message::Piece { idx, begin, block } => {
                     if idx != piece.idx { 
@@ -95,19 +106,24 @@ impl Peer {
                 }
 
                 Message::Request { idx, begin, length } => {
-                    requests.send(Request { idx, begin, length }).await;
+                    let _ = requests.send(Request::new(idx, begin, length, Action::Request)).await;
                 },
 
                 Message::Cancel { idx, begin, length } => {
-
+                    let _ = requests.send(Request::new(idx, begin, length, Action::Cancel)).await;
                 },
 
-                Message::Port { port } => self.new_port(port as u16),
+                _ => self.handle_msg(msg),
             }
         }
 
-        // Send piece data to hasher.
-        Ok(())
+        match piece.verify_hash(&piece_data) {
+            Ok(_) => {
+                fs_out.send(PieceData { idx: piece.idx, data: piece_data }).await?;
+                Ok(())
+            }
+            Err(e) => Err(Error::PieceError(e))
+        }
     }
 }
 

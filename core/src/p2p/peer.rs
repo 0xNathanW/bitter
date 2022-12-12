@@ -1,3 +1,4 @@
+use std::fmt::Debug;
 use std::net::{SocketAddrV4, Ipv4Addr};
 use tokio::net::TcpStream;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -8,6 +9,7 @@ use super::{Result, Error};
 use super::bitfield::Bitfield;
 use super::handshake::*;
 
+#[derive(Debug)]
 pub struct Peer {
     
     id:        Option<String>,
@@ -53,13 +55,12 @@ impl Peer {
     pub async fn connect(
         &mut self, 
         info_hash: [u8; 20], 
-        id: [u8; 20],
         display_chan: Option<mpsc::Sender<String>>,
     ) -> Result<()> {
         let stream = TcpStream::connect(self.addr).await?;
         self.stream = Some(stream);
         self.display_chan = display_chan;
-        self.exchange_handshake(info_hash, id).await?;
+        self.exchange_handshake(info_hash).await?;
         self.build_bitfield().await?;
         Ok(())
     }
@@ -70,9 +71,9 @@ impl Peer {
         }
     }
 
-    async fn exchange_handshake(&mut self, info_hash: [u8; 20], id: [u8; 20]) -> Result<()> {
+    async fn exchange_handshake(&mut self, info_hash: [u8; 20]) -> Result<()> {
         
-        let msg = handshake(info_hash, id);
+        let msg = handshake(info_hash);
         if let Some(stream) = &mut self.stream {
             stream.write_all(&msg).await?;
         } else {
@@ -115,6 +116,21 @@ impl Peer {
         }
     }
 
+    // Generic message handler.
+    pub fn handle_msg(&mut self, msg: Message) {
+        match msg {
+            Message::KeepAlive => {},
+            Message::Choke => self.peer_choking = true,
+            Message::Unchoke => self.peer_choking = false,
+            Message::Interested => self.peer_interested = true,
+            Message::NotInterested => self.peer_interested = false,
+            Message::Have { idx } => self.set_piece(idx),
+            Message::Bitfield { bitfield } => self.set_bitfield(bitfield),
+            Message::Port { port } => self.new_port(port),
+            _ => {}
+        }
+    }
+
     pub fn set_bitfield(&mut self, bitfield: Bitfield) {
         self.bitfield = bitfield;
     }
@@ -127,7 +143,7 @@ impl Peer {
         self.bitfield.set_piece(idx);
     }
 
-    pub fn new_port(&mut self, port: u16) {
+    pub fn new_port(&mut self, _port: u32) {
         todo!()
     }
 }
@@ -142,7 +158,6 @@ mod tests {
     #[tokio::test] 
     async fn test_peer () {
         let info_hash = [189, 0, 237, 28, 241, 142, 87, 90, 92, 184, 41, 212, 52, 155, 206, 237, 52, 215, 104, 51];
-        let id = rand::thread_rng().gen::<[u8; 20]>();
         // Abitrary real peer.
         let info = PeerInfo {
             id: None,
@@ -150,6 +165,6 @@ mod tests {
         };
 
         let mut peer = Peer::new(None, info.addr);
-        peer.connect(info_hash, id, None).await.unwrap();
+        peer.connect(info_hash, None).await.unwrap();
     }
 }

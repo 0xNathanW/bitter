@@ -32,6 +32,9 @@ pub enum Error {
 
     #[error("Peer choked: unable to send requests")]
     Choke,
+
+    #[error("Channel Error: {0}")]
+    ChannelError(#[from] tokio::sync::mpsc::error::SendError<piece::PieceData>),
 }
 
 use crate::tracker::PeerInfo;

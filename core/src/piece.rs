@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::collections::VecDeque;
 use tokio::sync::Mutex;
 use thiserror::Error;
+use sha1::{Sha1, Digest};
 
 use super::torrent::Torrent;
 
@@ -11,9 +12,15 @@ pub enum Error {
     IndexMismatch(u32, u32),
 
     #[error("Recieved block has invalid bounds: {0}")]
-    BlockInvalidBounds(String)
-}
+    BlockInvalidBounds(String),
 
+    #[error("Recieved piece #{idx} with invalid hash: expected {expected:?}, got {actual:?}")]
+    InvalidHash {
+        idx: u32,
+        expected: [u8; 20],
+        actual: [u8; 20],
+    },
+}
 
 // Piece of the torrent data.
 #[derive(Debug)]
@@ -24,7 +31,21 @@ pub struct Piece {
     pub end:    u32,
 }
 
+impl Piece {
+    pub fn verify_hash(&self, data: &[u8]) -> Result<(), Error> {
+        let mut hasher = Sha1::new();
+        hasher.update(data);
+        let hash: [u8; 20] = hasher.finalize().into();
+        if hash == self.hash {
+            Ok(())
+        } else {
+            Err(Error::InvalidHash { idx: self.idx, expected: self.hash, actual: hash })
+        }
+    }
+}
+
 // Piece data received from peers.
+#[derive(Debug)]
 pub struct PieceData {
     pub idx:  u32,
     pub data: Vec<u8>,
@@ -78,7 +99,7 @@ mod test {
     use std::path::Path;
     use rand::Rng;
 
-    #[tokio::test]
+    #[tokio::test] #[ignore]
     async fn piece_work_queue() {
 
         let torrent_path = Path::new("../test_torrents/test_single_file.torrent");

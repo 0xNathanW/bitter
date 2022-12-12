@@ -63,7 +63,7 @@ impl Peer {
                             break;
                         },
                         Message::Unchoke => {
-                            self.choked = false;
+                            self.peer_choking = false;
                             break;
                         },
                         _ => { return Err(Error::InvalidMessage("Bitfield/Have".to_string(), msg.fmt_short())) },

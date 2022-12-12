@@ -6,6 +6,7 @@ pub mod torrent;
 pub mod piece;
 pub mod tracker;
 pub mod p2p;
+use p2p::peer;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
