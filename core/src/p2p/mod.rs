@@ -24,8 +24,8 @@ pub enum Error {
     #[error("Invalid message id recieved: {0}")]
     InvalidMessageID(u8),
 
-    #[error("Invalid message recieved: expected {0}, got {1}")]
-    InvalidMessage(String, String),
+    #[error("Unexpected message recieved: expected {0}, got {1}")]
+    UnexpectedMessage(String, String),
 
     #[error(transparent)]
     PieceError(#[from] piece::Error),

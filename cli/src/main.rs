@@ -1,4 +1,5 @@
 use clap::Parser;
+use tokio::sync::mpsc;
 use core::{
     torrent::Torrent,
     tracker::tracker::Tracker,
@@ -26,20 +27,35 @@ async fn main() {
     let mut tracker = Tracker::new(&torrent);
 
     let work_queue = PieceWorkQueue::new(&torrent);
-
+    // let (dx, mut dy) = mpsc::channel(10);
+    let (px, mut py) = mpsc::channel(10);
+    let (rx, mut ry) = mpsc::channel(10);
 
     let (peer_info, _active, _inactive) = tracker.request_peers().await.unwrap();
     let peers = parse_peers(peer_info);
 
     for mut peer in peers {
         let queue = work_queue.clone();
+        // let dx = dx.clone();
+        let px = px.clone();
+        let rx = rx.clone();
         tokio::spawn(async move {
             match peer.connect(info_hash.clone(), None).await {
                 Ok(_) => println!("Connected to peer: {:?}", peer),
-                Err(e) => println!("Failed to connect to peer: {}", e),
+                Err(e) => println!("Failed to connect to peer: {} \n {:?}", e, peer),
             };
+            peer.trade_pieces(queue, px, rx).await;
         });
     }
 
-    tokio::time::sleep(std::time::Duration::from_secs(1000)).await;
+    loop {
+        tokio::select! {
+            Some(piece) = py.recv() => {
+                println!("Received piece: {:?}\n", piece);
+            }
+            Some(request) = ry.recv() => {
+                println!("Received request: {:?}\n", request);
+            }
+        }
+    }
 }

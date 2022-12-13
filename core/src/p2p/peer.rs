@@ -22,7 +22,7 @@ pub struct Peer {
     pub peer_choking:       bool,
     pub peer_interested:    bool,
 
-    display_chan: Option<mpsc::Sender<String>>,
+    pub display_chan: Option<mpsc::Sender<String>>,
 }
 
 impl Default for Peer {
@@ -57,11 +57,13 @@ impl Peer {
         info_hash: [u8; 20], 
         display_chan: Option<mpsc::Sender<String>>,
     ) -> Result<()> {
+
         let stream = TcpStream::connect(self.addr).await?;
         self.stream = Some(stream);
         self.display_chan = display_chan;
         self.exchange_handshake(info_hash).await?;
         self.build_bitfield().await?;
+        
         Ok(())
     }
 

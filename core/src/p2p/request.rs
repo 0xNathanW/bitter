@@ -1,9 +1,10 @@
-
+#[derive(Debug)]
 pub enum Action {
     Request,
     Cancel,
 }
 
+#[derive(Debug)]
 pub struct Request {
     idx: u32,
     begin: u32,

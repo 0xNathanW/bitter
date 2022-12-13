@@ -1,3 +1,5 @@
+use tokio::time::{timeout, Duration};
+
 use super::{Result, Error};
 use super::message::Message;
 use super::peer::Peer;
@@ -46,19 +48,27 @@ impl Peer {
     // The message immediately following a handshake is a bitfield message.
     pub async fn build_bitfield(&mut self) -> Result<()> {
         let mut recieved_bitfiled = false;
-        while let Ok(msg) = self.recv().await {
+        // Exit loop on timeout/unchoke/recieve error.
+        while let Ok(Ok(msg)) = timeout(Duration::from_secs(3), self.recv()).await {
             match msg {
+
                 Message::Bitfield { bitfield } => {
+                    // Should only recieve one bitfield message.
+                    if recieved_bitfiled {
+                        return Err(Error::UnexpectedMessage("not bitfield".to_string(), "consecutive bitfield".to_string()));
+                    }
+                    self.set_bitfield(bitfield);
+                    recieved_bitfiled = true;
                 },
-                Message::Have(idx) => {
-                    self.bitfield.set_piece(idx);
+
+                Message::Have{ idx } => self.set_piece(idx),
+                
+                Message::Unchoke => {
+                    self.peer_choking = false;
+                    break;
                 },
-                _ => {
-                    return Err(Error::UnexpectedMessage(msg));
-                }
-            }
-            if bitfields_n > 1 {
-                return Err(Error::TooManyBitfields);
+
+                _ => return Err(Error::UnexpectedMessage("have/bitfield/unchoke".to_string(), msg.fmt_short())),
             }
         }
         

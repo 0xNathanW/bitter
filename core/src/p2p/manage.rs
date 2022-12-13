@@ -19,19 +19,27 @@ impl Peer {
         requests: mpsc::Sender<Request>,
     ) -> Result<()> {
 
-        // Communicate desire to download pieces.
-        self.send(Message::Interested).await?;
-        
+        // Make sure the peer is not choking us.
+        if self.choked {
+            self.send(Message::Interested).await?;
+            let msg = self.recv().await?;
+            match msg {
+                Message::Unchoke => self.choked = false,
+                _ => return Err(Error::Choke),
+            }
+        }
 
         while let Some(piece) = workload.next().await {
             if !self.has_piece(piece.idx) {
                 workload.push(piece).await;
                 continue;
             }
-
             if self.download_piece(&piece, &requests, &fs_out).await.is_err() {
                 workload.push(piece).await;
                 continue;
+            }
+            if let Some(chan) = &self.display_chan {
+                let _ = chan.send(format!("Downloaded piece {}.", piece.idx)).await;
             }
         }
 
@@ -121,8 +129,8 @@ impl Peer {
             Ok(_) => {
                 fs_out.send(PieceData { idx: piece.idx, data: piece_data }).await?;
                 Ok(())
-            }
-            Err(e) => Err(Error::PieceError(e))
+            },
+            Err(e) => Err(Error::PieceError(e)),
         }
     }
 }
