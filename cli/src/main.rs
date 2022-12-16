@@ -1,61 +1,51 @@
 use clap::Parser;
-use tokio::sync::mpsc;
-use core::{
-    torrent::Torrent,
-    tracker::tracker::Tracker,
-    piece::PieceWorkQueue,
-    p2p::parse_peers,
+use anyhow::Result;
+use crossterm::{execute, terminal::EnterAlternateScreen, terminal::LeaveAlternateScreen};
+use tui::{
+    backend::CrosstermBackend, 
+    Terminal,
+    widgets::{Block, Borders},
 };
 
-#[derive(Parser)]
-struct Args {
-    #[arg(short, long, help = "Path to torrent file")]
-    torrent: String,
+mod app;
 
-    #[arg(short, long, help = "Verbose output")]
-    verbose: bool,
-}
+// #[derive(Parser)]
+// struct Args {
+//     #[arg(short, long, help = "Path to torrent file")]
+//     torrent: String,
 
-#[tokio::main]
-async fn main() {
+//     #[arg(short, long, help = "Verbose output")]
+//     verbose: bool,
+// }
 
-    let args = Args::parse();
+fn main() -> Result<()> {
 
-    let torrent_path = std::path::Path::new(&args.torrent);
-    let torrent = Torrent::new(torrent_path).unwrap();
-    let info_hash = torrent.info_hash().clone();
-    let mut tracker = Tracker::new(&torrent);
+    // let args = Args::parse();
+    
+    // Setup terminal
+    crossterm::terminal::enable_raw_mode()?;
+    let mut stdout = std::io::stdout();
+    execute!(stdout, EnterAlternateScreen)?;
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
 
-    let work_queue = PieceWorkQueue::new(&torrent);
-    // let (dx, mut dy) = mpsc::channel(10);
-    let (px, mut py) = mpsc::channel(10);
-    let (rx, mut ry) = mpsc::channel(10);
 
-    let (peer_info, _active, _inactive) = tracker.request_peers().await.unwrap();
-    let peers = parse_peers(peer_info);
+    terminal.draw(|f| {
+        let size = f.size();
+        let block = Block::default()
+            .title("Block")
+            .borders(Borders::ALL);
+        f.render_widget(block, size);
+    })?;
 
-    for mut peer in peers {
-        let queue = work_queue.clone();
-        // let dx = dx.clone();
-        let px = px.clone();
-        let rx = rx.clone();
-        tokio::spawn(async move {
-            match peer.connect(info_hash.clone(), None).await {
-                Ok(_) => println!("Connected to peer: {:?}", peer),
-                Err(e) => println!("Failed to connect to peer: {} \n {:?}", e, peer),
-            };
-            peer.trade_pieces(queue, px, rx).await;
-        });
-    }
+    use std::{thread, time::Duration};
+    thread::sleep(Duration::from_millis(5000));
 
-    loop {
-        tokio::select! {
-            Some(piece) = py.recv() => {
-                println!("Received piece: {:?}\n", piece);
-            }
-            Some(request) = ry.recv() => {
-                println!("Received request: {:?}\n", request);
-            }
-        }
-    }
+
+
+
+    // Restore terminal
+    crossterm::terminal::disable_raw_mode()?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    Ok(())
 }

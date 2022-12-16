@@ -6,24 +6,8 @@ use sha1::{Sha1, Digest};
 
 use super::torrent::Torrent;
 
-#[derive(Debug, Error)]
-pub enum Error {
-    #[error("Index mismatch: expected {0}, got {1}")]
-    IndexMismatch(u32, u32),
-
-    #[error("Recieved block has invalid bounds: {0}")]
-    BlockInvalidBounds(String),
-
-    #[error("Recieved piece #{idx} with invalid hash: expected {expected:?}, got {actual:?}")]
-    InvalidHash {
-        idx: u32,
-        expected: [u8; 20],
-        actual: [u8; 20],
-    },
-}
-
 // Piece of the torrent data.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Piece {
     pub idx:    u32,
     pub hash:   [u8; 20],

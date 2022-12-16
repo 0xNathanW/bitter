@@ -78,9 +78,9 @@ impl Message {
             },
 
             // bitfield: <len=0001+X><id=5><bitfield>
-            Message::Bitfield { mut bitfield } => {
-                let mut buf = vec![0, 0, 0, 1 + bitfield.0.len() as u8, 5];
-                buf.append(&mut bitfield.0);
+            Message::Bitfield { bitfield } => {
+                let mut buf = vec![0, 0, 0, 1 + bitfield.len() as u8, 5];
+                buf.extend(bitfield.consume());
                 buf
             },
 
@@ -128,7 +128,7 @@ impl Message {
             2 => Ok(Message::Interested),
             3 => Ok(Message::NotInterested),
             4 => Ok(Message::Have { idx: u32::from_be_bytes([buf[1], buf[2], buf[3], buf[4]]) }),
-            5 => Ok(Message::Bitfield { bitfield: Bitfield(buf[1..].to_vec()) }),
+            5 => Ok(Message::Bitfield { bitfield: buf[1..].to_vec().into() }),
             6 => Ok(Message::Request {
                 idx:    u32::from_be_bytes([buf[1], buf[2], buf[3], buf[4]]),
                 begin:  u32::from_be_bytes([buf[5], buf[6], buf[7], buf[8]]),
@@ -195,7 +195,7 @@ mod tests {
         assert_eq!(Message::NotInterested.encode(), vec![0, 0, 0, 1, 3]);
         assert_eq!(Message::Have { idx: 0xb }.encode(), vec![0, 0, 0, 5, 4, 0, 0, 0, 0xb]);
         assert_eq!(
-            Message::Bitfield { bitfield: Bitfield(vec![0x1, 0x2, 0x3]) }.encode(),
+            Message::Bitfield { bitfield: vec![0x1, 0x2, 0x3].into() }.encode(),
             vec![0, 0, 0, 4, 5, 0x1, 0x2, 0x3]
         );
         assert_eq!(

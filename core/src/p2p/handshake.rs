@@ -1,10 +1,8 @@
 use std::vec;
-
 use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum Error {
-
     #[error("Incorrect length, expected 68, got {0}")]
     IncorrectLength(usize),
 

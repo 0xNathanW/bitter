@@ -1,9 +1,11 @@
 use std::fmt::Debug;
 use std::net::{SocketAddrV4, Ipv4Addr};
-use tokio::net::TcpStream;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::sync::mpsc;
-
+use tokio::{
+    time::{timeout, Duration},
+    net::TcpStream,
+    io::{AsyncReadExt, AsyncWriteExt},
+    sync::mpsc,
+};
 use super::message::Message;
 use super::{Result, Error};
 use super::bitfield::Bitfield;
@@ -11,7 +13,6 @@ use super::handshake::*;
 
 #[derive(Debug)]
 pub struct Peer {
-    
     id:        Option<String>,
     addr:      SocketAddrV4,
     stream:    Option<tokio::net::TcpStream>,
@@ -54,11 +55,11 @@ impl Peer {
     // Involves everything up to the point where we start trading pieces.
     pub async fn connect(
         &mut self, 
-        info_hash: [u8; 20], 
+        info_hash: [u8; 20],
         display_chan: Option<mpsc::Sender<String>>,
     ) -> Result<()> {
 
-        let stream = TcpStream::connect(self.addr).await?;
+        let stream = timeout(Duration::from_secs(5), TcpStream::connect(self.addr)).await??;
         self.stream = Some(stream);
         self.display_chan = display_chan;
         self.exchange_handshake(info_hash).await?;
@@ -118,6 +119,38 @@ impl Peer {
         }
     }
 
+
+        // The message immediately following a handshake is a bitfield message.
+    pub async fn build_bitfield(&mut self) -> Result<()> {
+        let mut recieved_bitfiled = false;
+        // Exit loop on timeout/unchoke/recieve error.
+        while let Ok(Ok(msg)) = timeout(Duration::from_secs(3), self.recv()).await {
+            match msg {
+
+                Message::Bitfield { bitfield } => {
+                    // Should only recieve one bitfield message.
+                    if recieved_bitfiled {
+                        return Err(Error::UnexpectedMessage("not bitfield".to_string(), "consecutive bitfield".to_string()));
+                    }
+                    self.set_bitfield(bitfield);
+                    recieved_bitfiled = true;
+                },
+
+                Message::Have{ idx } => self.set_piece(idx),
+                
+                Message::Unchoke => {
+                    self.peer_choking = false;
+                    break;
+                },
+
+                _ => return Err(Error::UnexpectedMessage("have/bitfield/unchoke".to_string(), msg.fmt_short())),
+            }
+        }
+        
+        Ok(())
+    }
+    
+
     // Generic message handler.
     pub fn handle_msg(&mut self, msg: Message) {
         match msg {
@@ -130,6 +163,17 @@ impl Peer {
             Message::Bitfield { bitfield } => self.set_bitfield(bitfield),
             Message::Port { port } => self.new_port(port),
             _ => {}
+        }
+    }
+
+    pub async fn attempt_unchoke(&mut self) -> Result<()> {
+        self.send(Message::Interested).await?;
+        match self.recv().await? {
+            Message::Unchoke => {
+                self.choked = false;
+                Ok(())
+            },
+            _ => Err(Error::Choke),
         }
     }
 

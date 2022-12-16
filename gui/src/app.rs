@@ -1,5 +1,6 @@
 use core::torrent::Torrent;
 use std::rc::Rc;
-pub struct App {
+pub struct AppData {
     torrent: Rc<Torrent>,
+    
 }

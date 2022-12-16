@@ -26,11 +26,8 @@ impl Widgets {
 
     pub fn new() -> Self {
         Self {
-            
             items: vec![
-
             ],
-
             open: BTreeSet::new(),
         }
     }

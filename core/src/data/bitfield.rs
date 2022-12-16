@@ -1,8 +1,6 @@
 use tokio::time::{timeout, Duration};
 
 use super::{Result, Error};
-use super::message::Message;
-use super::peer::Peer;
 
 /* The bitfield message is variable length, where X is the length of the bitfield.
 The payload is a bitfield representing the pieces that have been successfully downloaded.
@@ -11,12 +9,20 @@ Bits that are cleared indicated a missing piece, and set bits indicate a valid a
 Spare bits at the end are set to zero. */
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Bitfield(pub Vec<u8>);
+pub struct Bitfield(Vec<u8>);
 
 impl Bitfield {
 
     pub fn new(size: usize) -> Self {
         Self(vec![0; size])
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn consume(self) -> Vec<u8> {
+        self.0
     }
 
     pub fn has_piece(&self, idx: u32) -> bool {
@@ -43,40 +49,6 @@ impl From<Vec<u8>> for Bitfield {
         Self(v)
     }
 }
-
-impl Peer {
-    // The message immediately following a handshake is a bitfield message.
-    pub async fn build_bitfield(&mut self) -> Result<()> {
-        let mut recieved_bitfiled = false;
-        // Exit loop on timeout/unchoke/recieve error.
-        while let Ok(Ok(msg)) = timeout(Duration::from_secs(3), self.recv()).await {
-            match msg {
-
-                Message::Bitfield { bitfield } => {
-                    // Should only recieve one bitfield message.
-                    if recieved_bitfiled {
-                        return Err(Error::UnexpectedMessage("not bitfield".to_string(), "consecutive bitfield".to_string()));
-                    }
-                    self.set_bitfield(bitfield);
-                    recieved_bitfiled = true;
-                },
-
-                Message::Have{ idx } => self.set_piece(idx),
-                
-                Message::Unchoke => {
-                    self.peer_choking = false;
-                    break;
-                },
-
-                _ => return Err(Error::UnexpectedMessage("have/bitfield/unchoke".to_string(), msg.fmt_short())),
-            }
-        }
-        
-        Ok(())
-    }
-
-}
-
 
 #[cfg(test)]
 mod tests {

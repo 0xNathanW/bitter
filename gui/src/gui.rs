@@ -19,20 +19,17 @@ impl eframe::App for Gui {
 
     // Called each time the UI needs repainting, which may be many times per second.
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-
         if !self.torrent_loaded {
             self.file_input(ctx);
-            return;
+        } else {
+            self.widgets.display(ctx, frame);
         }
-        
-        self.widgets.display(ctx, frame);
     }
 }
 
 impl Gui {
 
     fn file_input(&mut self, ctx: &egui::Context) {
-
         use std::fmt::Write as _;
         use egui::layers;
 

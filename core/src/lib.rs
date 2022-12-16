@@ -3,9 +3,11 @@
 use thiserror::Error;
 
 pub mod torrent;
-pub mod piece;
+pub mod data;
 pub mod tracker;
 pub mod p2p;
+pub mod fs;
+pub mod state;
 use p2p::peer;
 
 pub type Result<T> = std::result::Result<T, Error>;

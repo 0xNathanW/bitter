@@ -1,19 +1,23 @@
 use std::fs;
 use std::sync::Arc;
+use std::thread::spawn;
 use tokio::sync::{mpsc, Mutex};
+use tokio::task::spawn_blocking;
 
 use crate::piece::{PieceWorkQueue, Piece, PieceData, self};
-use super::{Result, Error};
-use super::peer::Peer;
-use super::message::Message;
-use super::request::{Request, Action};
+use super::{
+    {Result, Error},
+    peer::Peer,
+    message::Message,
+    request::{Request, Action},
+};
 
 const BLOCK_LEN: u32 = 16384; // 16Kb
 
 impl Peer {
 
     pub async fn trade_pieces(
-        &mut self,       
+        &mut self,
         workload: PieceWorkQueue,
         fs_out: mpsc::Sender<PieceData>,
         requests: mpsc::Sender<Request>,
@@ -21,6 +25,7 @@ impl Peer {
 
         // Make sure the peer is not choking us.
         if self.choked {
+            // Attempt unchoke.
             self.send(Message::Interested).await?;
             let msg = self.recv().await?;
             match msg {
@@ -34,7 +39,7 @@ impl Peer {
                 workload.push(piece).await;
                 continue;
             }
-            if self.download_piece(&piece, &requests, &fs_out).await.is_err() {
+            if self.download_piece(piece.clone(), &requests, &fs_out).await.is_err() {
                 workload.push(piece).await;
                 continue;
             }
@@ -42,6 +47,8 @@ impl Peer {
                 let _ = chan.send(format!("Downloaded piece {}.", piece.idx)).await;
             }
         }
+        // Implement a barrier here.
+        
 
         Ok(())
     }
@@ -51,13 +58,13 @@ impl Peer {
 	// The last block will likely be smaller.
     pub async fn download_piece(
         &mut self, 
-        piece: &Piece, 
+        piece: Piece,
         requests: &mpsc::Sender<Request>,
         fs_out: &mpsc::Sender<PieceData>,
     ) -> Result<()> {
 
         let piece_len: u32 = piece.end - piece.begin;
-        let mut piece_data = Vec::<u8>::with_capacity(piece_len as usize);
+        let mut piece_data = vec![0_u8; piece_len as usize];
         let mut requested = 0_u32;
         let mut downloaded = 0_u32;
 
@@ -82,13 +89,7 @@ impl Peer {
         while downloaded < piece_len {
 
             if self.peer_choking {
-                // Attempt unchoke.
-                self.send(Message::Interested).await?;
-                let msg = self.recv().await?;
-                match msg {
-                    Message::Unchoke => self.peer_choking = false,
-                    _ => return Err(Error::Choke),
-                }
+                self.attempt_unchoke().await?;
             }
 
             let msg = self.recv().await?;
@@ -125,13 +126,11 @@ impl Peer {
             }
         }
 
-        match piece.verify_hash(&piece_data) {
-            Ok(_) => {
-                fs_out.send(PieceData { idx: piece.idx, data: piece_data }).await?;
-                Ok(())
-            },
-            Err(e) => Err(Error::PieceError(e)),
-        }
+        let cloned_piece_data = piece_data.clone();
+        spawn_blocking(move || { piece.verify_hash(&cloned_piece_data) }).await.unwrap()?;
+
+        fs_out.send(PieceData { idx: piece.idx, data: piece_data }).await?;
+        Ok(())
     }
 }
 
