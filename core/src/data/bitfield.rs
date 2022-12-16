@@ -1,7 +1,3 @@
-use tokio::time::{timeout, Duration};
-
-use super::{Result, Error};
-
 /* The bitfield message is variable length, where X is the length of the bitfield.
 The payload is a bitfield representing the pieces that have been successfully downloaded.
 The high bit in the first byte corresponds to piece index 0.

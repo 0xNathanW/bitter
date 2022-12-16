@@ -8,8 +8,8 @@ use tokio::{
 };
 use super::message::Message;
 use super::{Result, Error};
-use super::bitfield::Bitfield;
 use super::handshake::*;
+use crate::data::Bitfield;
 
 #[derive(Debug)]
 pub struct Peer {

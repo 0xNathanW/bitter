@@ -41,6 +41,7 @@ impl RequestParams {
         }
     }
 
+    // Update request params after the first request with new values.
     pub fn refresh_params(&mut self, uploaded: u64, downloaded: u64, left: u64) {
         self.uploaded = uploaded;
         self.downloaded = downloaded;

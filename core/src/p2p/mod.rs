@@ -30,16 +30,13 @@ pub enum Error {
     Choke,
     
     #[error(transparent)]
-    PieceError(#[from] piece::Error),
+    DataError(#[from] crate::data::Error),
     
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
     
     #[error("Timeout: {0}")]
     Timeout(#[from] tokio::time::error::Elapsed),
-
-    #[error("Channel Error: {0}")]
-    ChannelError(#[from] tokio::sync::mpsc::error::SendError<piece::PieceData>),
 }
 
 use crate::tracker::PeerInfo;

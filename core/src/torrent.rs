@@ -2,8 +2,18 @@ use std::{path::Path, fs::read};
 use serde_derive::{Deserialize, Serialize};
 use sha1::{Sha1, Digest};
 use bencode::{decode_bytes, encode_to_raw};
+use thiserror::Error;
 
-use crate::{Result, Error};
+#[derive(Debug, Error)]
+pub enum Error {
+    #[error("Bencode error: {0}")]
+    BencodeError(String),
+
+    #[error("IO error: {0}")]
+    IoError(#[from] std::io::Error),
+}
+
+type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, Deserialize)]
 struct Node(String, i64);

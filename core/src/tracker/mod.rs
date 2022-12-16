@@ -18,16 +18,14 @@ pub enum Error {
     #[error("Error deserializing tracker response: {0}")]
     BencodeError(#[from]bencode::Error),
 
-    #[error("Tracker Error:
-        code({code:?}), 
-        {msg:?}
-    ")]
+    #[error("Tracker Error: code({code:?}), {msg:?}")]
     TrackerError {
         msg: String,
         code: Option<u64>,
     },
 }
 
+// Integration test.
 #[cfg(test)]
 mod tests {
     use std::net::{SocketAddrV4, Ipv4Addr};
