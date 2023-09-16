@@ -4,7 +4,6 @@ use std::thread::spawn;
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::spawn_blocking;
 
-use crate::piece::{PieceWorkQueue, Piece, PieceData, self};
 use super::{
     {Result, Error},
     peer::Peer,

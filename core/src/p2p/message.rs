@@ -1,4 +1,3 @@
-use super::bitfield::Bitfield;
 use super::{Result, Error};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,7 +27,7 @@ pub enum Message {
     // The bitfield message is a short form method of communicating to a peer what pieces 
     // a client has usually sent after the handshake has been completed.
     Bitfield {
-        bitfield: Bitfield,
+        bitfield: Vec<u8>,
     },
 
     // When a client wants to request data, they reference the index of the piece, the index 
@@ -167,17 +166,17 @@ impl Message {
 
     pub fn fmt_long(&self) -> String {
         match self {
-            Message::KeepAlive            => "KeepAlive".to_string(),
-            Message::Choke                => "Choke".to_string(),
-            Message::Unchoke              => "Unchoke".to_string(),
-            Message::Interested           => "Interested".to_string(),
-            Message::NotInterested        => "NotInterested".to_string(),
-            Message::Have { idx }   => format!("Have({})", idx),
-            Message::Bitfield { bitfield: _ }                     => format!("Bitfield"),
+            Message::KeepAlive                                            => "KeepAlive".to_string(),
+            Message::Choke                                                => "Choke".to_string(),
+            Message::Unchoke                                              => "Unchoke".to_string(),
+            Message::Interested                                           => "Interested".to_string(),
+            Message::NotInterested                                        => "NotInterested".to_string(),
+            Message::Have { idx }                                   => format!("Have({})", idx),
+            Message::Bitfield { bitfield: _ }                             => format!("Bitfield"),
             Message::Request { idx, begin, length }     => format!("Request(idx: {}, begin: {}, length: {})", idx, begin, length),
             Message::Piece { idx, begin, block }    => format!("Piece(idx: {}, begin: {}, length: {})", idx, begin, block.len()),
             Message::Cancel { idx, begin, length }      => format!("Cancel(idx: {}, begin: {}, length: {})", idx, begin, length),
-            Message::Port { port }  => format!("Port({})", port),
+            Message::Port { port }                                  => format!("Port({})", port),
         }
     }
 }
@@ -195,7 +194,7 @@ mod tests {
         assert_eq!(Message::NotInterested.encode(), vec![0, 0, 0, 1, 3]);
         assert_eq!(Message::Have { idx: 0xb }.encode(), vec![0, 0, 0, 5, 4, 0, 0, 0, 0xb]);
         assert_eq!(
-            Message::Bitfield { bitfield: vec![0x1, 0x2, 0x3].into() }.encode(),
+            Message::Bitfield { bitfield: vec![0x1, 0x2, 0x3] }.encode(),
             vec![0, 0, 0, 4, 5, 0x1, 0x2, 0x3]
         );
         assert_eq!(
