@@ -1,62 +1,135 @@
-use std::vec;
-use thiserror::Error;
+use std::{io::Cursor, fmt::Debug};
+use bytes::{BufMut, Buf};
+use tokio_util::codec::{Encoder, Decoder};
+use super::PeerError;
 
-#[derive(Error, Debug)]
-pub enum Error {
-    #[error("Incorrect length, expected 68, got {0}")]
-    IncorrectLength(usize),
+pub const PROTOCOL: [u8; 19] = *b"BitTorrent protocol";
 
-    #[error("Incorrect protocol, expected \"BitTorrent protocol\", got {0}")]
-    IncorrectProtocol(String),
-
-    #[error("Incorrect info hash, expected {expected:?}, got {got:?}")]
-    IncorrectInfoHash {
-        expected: [u8; 20],
-        got:      [u8; 20],
-    },
+pub struct Handshake {
+    pub protocol:   [u8; 19],
+    pub reserved:   [u8; 8],
+    pub info_hash:  [u8; 20],
+    pub peer_id:    [u8; 20],
 }
 
-pub fn handshake(info_hash: [u8; 20]) -> Vec<u8> {
-    let mut buf = vec![0; 68];
-    buf[0] = 19;
-    buf[1..20].copy_from_slice(b"BitTorrent protocol");
-    buf[28..48].copy_from_slice(&info_hash);
-    buf[48..68].copy_from_slice(b"-RS0133-73b3b0b0b0b0");
-    buf
+impl Handshake {
+    pub fn new(info_hash: [u8; 20]) -> Self {
+        Self {
+            protocol:   PROTOCOL,
+            reserved:   [0; 8],
+            info_hash,
+            peer_id:    *b"-RS0133-73b3b0b0b0b0",
+        }
+    }
 }
 
-pub fn verify_handshake(msg: Vec<u8>, info_hash: [u8; 20]) -> Result<(), Error> {
-    if msg.len() != 68 {
-        return Err(Error::IncorrectLength(msg.len()));
+pub struct HandshakeCodec;
+
+impl Encoder<Handshake> for HandshakeCodec {
+
+    type Error = PeerError;
+
+    fn encode(&mut self, item: Handshake, dst: &mut bytes::BytesMut) -> Result<(), Self::Error> {
+        dst.put_u8(19);
+        dst.extend_from_slice(&item.protocol);
+        dst.extend_from_slice(&item.reserved);
+        dst.extend_from_slice(&item.info_hash);
+        dst.extend_from_slice(&item.peer_id);
+        Ok(())
     }
-    if msg[1..20] != b"BitTorrent protocol".to_vec() || msg[0] != 19 {
-        return Err(Error::IncorrectProtocol(String::from_utf8_lossy(msg[0..20].as_ref()).to_string()));
+}
+
+impl Decoder for HandshakeCodec {
+
+    type Item = Handshake;
+    type Error = PeerError;
+
+    fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        
+        if src.is_empty() {
+            return Ok(None);
+        }
+
+        let mut peeker = Cursor::new(&src[..]);
+        let prt_len = peeker.get_u8();
+        if prt_len != 19 {
+            return Err(PeerError::IncorrectProtocol);
+        }
+
+        if src.remaining() != 67 {
+            src.advance(1);
+        } else {
+            return Ok(None)
+        }
+        
+        // Protocol
+        let mut protocol = [0; 19];
+        src.copy_to_slice(&mut protocol);
+
+        // Reserved
+        let mut reserved = [0; 8];
+        src.copy_to_slice(&mut reserved);
+
+        // Info hash
+        let mut info_hash = [0; 20];
+        src.copy_to_slice(&mut info_hash);
+
+        // Peer id
+        let mut peer_id = [0; 20];
+        src.copy_to_slice(&mut peer_id);
+
+        Ok(Some(Handshake {
+            protocol,
+            reserved,
+            info_hash,
+            peer_id,
+        }))
     }
-    if msg[28..48] != info_hash {
-        return Err(Error::IncorrectInfoHash {
-            expected:   info_hash,
-            got:        msg[28..48].try_into().unwrap(),
-        });
+}
+
+impl Debug for Handshake {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Handshake")
+            .field("protocol", &String::from_utf8_lossy(&self.protocol))
+            .field("reserved", &self.reserved)
+            .field("info_hash", &String::from_utf8_lossy(&self.info_hash))
+            .field("peer_id", &String::from_utf8_lossy(&self.peer_id))
+            .finish()
     }
-    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
-    fn test_handshake_out() {
-        let expected = hex::decode("13426974546f7272656e742070726f746f636f6c0000000000000000bd00ed1cf18e575a5cb829d4349bceed34d768332d5253303133332d373362336230623062306230");
-        let info_hash = hex::decode("bd00ed1cf18e575a5cb829d4349bceed34d76833").unwrap().try_into().unwrap();
-        let msg = handshake(info_hash);
-        assert_eq!(msg, expected.unwrap());
+    fn test_handshake_decoding() {
+        let mut src = bytes::BytesMut::new();
+        src.put_u8(19);
+        src.extend_from_slice(b"BitTorrent protocol");
+        src.extend_from_slice(&[0; 8]);
+        src.extend_from_slice(&[0; 20]);
+        src.extend_from_slice(&[0; 20]);
+
+        let mut decoder = HandshakeCodec;
+        let handshake = decoder.decode(&mut src).unwrap().unwrap();
+        assert_eq!(handshake.protocol, *b"BitTorrent protocol");
+        assert_eq!(handshake.reserved, [0; 8]);
+        assert_eq!(handshake.info_hash, [0; 20]);
+        assert_eq!(handshake.peer_id, [0; 20]);
     }
 
     #[test]
-    fn test_handshake() {
-        let info_hash = [0; 20];
-        let msg = handshake(info_hash);
-        verify_handshake(msg, info_hash).unwrap();
+    fn test_protocol_error() {
+        let mut src = bytes::BytesMut::new();
+        src.put_u8(18);
+        src.extend_from_slice(b"BitTorrent protocol wrong");
+        src.extend_from_slice(&[0; 8]);
+        src.extend_from_slice(&[0; 20]);
+        src.extend_from_slice(&[0; 20]);
+
+        let mut decoder = HandshakeCodec;
+        let handshake = decoder.decode(&mut src);
+        assert!(handshake.is_err());
     }
 }

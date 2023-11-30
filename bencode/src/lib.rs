@@ -4,9 +4,6 @@ mod decode;
 mod error;
 mod token;
 
-#[cfg(test)]
-mod torrent_test;
-
 // For bencode -> T
 pub use decode::{decode_bytes, decode_str};
 

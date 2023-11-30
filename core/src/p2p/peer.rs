@@ -1,216 +1,40 @@
-use std::fmt::Debug;
-use std::net::{SocketAddrV4, Ipv4Addr};
-use tokio::{
-    time::{timeout, Duration},
-    net::TcpStream,
-    io::{AsyncReadExt, AsyncWriteExt},
-    sync::mpsc,
-};
-use super::message::Message;
-use super::{Result, Error};
-use super::handshake::*;
-use crate::data::Bitfield;
+use tokio::{sync::mpsc::UnboundedSender, task::JoinHandle, net::TcpStream};
+use super::{Result, session::{PeerSession, PeerCommand}};
 
 #[derive(Debug)]
 pub struct Peer {
-    id:        Option<String>,
-    addr:      SocketAddrV4,
-    stream:    Option<tokio::net::TcpStream>,
-    bitfield:  Bitfield,
 
-    pub choked:             bool,
-    pub interested:         bool,
-    pub peer_choking:       bool,
-    pub peer_interested:    bool,
+    // Unique 20-byte id for peer.
+    pub id: Option<[u8; 20]>,
 
-    pub display_chan: Option<mpsc::Sender<String>>,
-}
+    // Sends commands to the torrent.
+    pub cmd_out: Option<UnboundedSender<PeerCommand>>,
 
-impl Default for Peer {
-    fn default() -> Self {
-        Self {
-            id:                 None,
-            addr:               SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0),
-            stream:             None,
-            bitfield:           Bitfield::new(0),
-            choked:             true,
-            interested:         false,
-            peer_choking:       true,
-            peer_interested:    false,
-            display_chan:       None,
-        }
-    }
+    // Handle to the peer session.
+    pub session_handle: Option<JoinHandle<Result<()>>>
 }
 
 impl Peer {
 
-    pub fn new(id: Option<String>, addr: SocketAddrV4) -> Self {
-        Self {
-            id,
-            addr,
-            ..Default::default()
-        }
-    }
-
-    // Involves everything up to the point where we start trading pieces.
-    pub async fn connect(
-        &mut self, 
-        info_hash: [u8; 20],
-        display_chan: Option<mpsc::Sender<String>>,
-    ) -> Result<()> {
-
-        let stream = timeout(Duration::from_secs(5), TcpStream::connect(self.addr)).await??;
-        self.stream = Some(stream);
-        self.display_chan = display_chan;
-        self.exchange_handshake(info_hash).await?;
-        self.build_bitfield().await?;
-        
-        Ok(())
-    }
-
-    pub async fn disconnect(&mut self) {
-        if let Some(stream) = &mut self.stream {
-            stream.shutdown().await.ok();
-        }
-    }
-
-    async fn exchange_handshake(&mut self, info_hash: [u8; 20]) -> Result<()> {
-        
-        let msg = handshake(info_hash);
-        if let Some(stream) = &mut self.stream {
-            stream.write_all(&msg).await?;
-        } else {
-            return Err(Error::NoStream);
-        }
-
-        let mut buf = vec![0; 68];
-        if let Some(stream) = &mut self.stream {
-            stream.read_exact(&mut buf).await?;
-        } else {
-            return Err(Error::NoStream);
-        }
-        verify_handshake(buf, info_hash)?;
-        
-        Ok(())
-    }
-
-    pub async fn send(&mut self, msg: Message) -> Result<()> {
-        if let Some(stream) = &mut self.stream {
-            stream.write_all(&msg.encode()).await?;
-        } else {
-            return Err(Error::NoStream);
-        }
-        Ok(())
-    }
-
-    pub async fn recv(&mut self) -> Result<Message> {
-        if let Some(stream) = &mut self.stream {
-            
-            let mut buf = vec![0; 4];
-            stream.read_exact(&mut buf).await?;
-            let len = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize;
-            
-            let mut buf = vec![0; len];
-            stream.read_exact(&mut buf).await?;
-            Ok(Message::decode(&buf)?)
-        
-        } else {
-            Err(Error::NoStream)
-        }
-    }
-
-
-        // The message immediately following a handshake is a bitfield message.
-    pub async fn build_bitfield(&mut self) -> Result<()> {
-        let mut recieved_bitfiled = false;
-        // Exit loop on timeout/unchoke/recieve error.
-        while let Ok(Ok(msg)) = timeout(Duration::from_secs(3), self.recv()).await {
-            match msg {
-
-                Message::Bitfield { bitfield } => {
-                    // Should only recieve one bitfield message.
-                    if recieved_bitfiled {
-                        return Err(Error::UnexpectedMessage("not bitfield".to_string(), "consecutive bitfield".to_string()));
-                    }
-                    self.set_bitfield(bitfield);
-                    recieved_bitfiled = true;
-                },
-
-                Message::Have{ idx } => self.set_piece(idx),
-                
-                Message::Unchoke => {
-                    self.peer_choking = false;
-                    break;
-                },
-
-                _ => return Err(Error::UnexpectedMessage("have/bitfield/unchoke".to_string(), msg.fmt_short())),
-            }
-        }
-        
-        Ok(())
-    }
-    
-
-    // Generic message handler.
-    pub fn handle_msg(&mut self, msg: Message) {
-        match msg {
-            Message::KeepAlive => {},
-            Message::Choke => self.peer_choking = true,
-            Message::Unchoke => self.peer_choking = false,
-            Message::Interested => self.peer_interested = true,
-            Message::NotInterested => self.peer_interested = false,
-            Message::Have { idx } => self.set_piece(idx),
-            Message::Bitfield { bitfield } => self.set_bitfield(bitfield),
-            Message::Port { port } => self.new_port(port),
-            _ => {}
-        }
-    }
-
-    pub async fn attempt_unchoke(&mut self) -> Result<()> {
-        self.send(Message::Interested).await?;
-        match self.recv().await? {
-            Message::Unchoke => {
-                self.choked = false;
-                Ok(())
-            },
-            _ => Err(Error::Choke),
-        }
-    }
-
-    pub fn set_bitfield(&mut self, bitfield: Bitfield) {
-        self.bitfield = bitfield;
-    }
-
-    pub fn has_piece(&self, idx: u32) -> bool {
-        self.bitfield.has_piece(idx)
-    }
-
-    pub fn set_piece(&mut self, idx: u32) {
-        self.bitfield.set_piece(idx);
-    }
-
-    pub fn new_port(&mut self, _port: u32) {
-        todo!()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::tracker::PeerInfo;
-    use std::net::{SocketAddrV4, Ipv4Addr};
-    use rand::Rng;
-
-    #[tokio::test] 
-    async fn test_peer () {
-        let info_hash = [189, 0, 237, 28, 241, 142, 87, 90, 92, 184, 41, 212, 52, 155, 206, 237, 52, 215, 104, 51];
-        // Abitrary real peer.
-        let info = PeerInfo {
+    fn new(cmd_out: UnboundedSender<PeerCommand>, handle: JoinHandle<Result<()>>) -> Peer {
+        Peer {
             id: None,
-            addr: SocketAddrV4::new(Ipv4Addr::new(81, 171, 5, 232), 63163),
-        };
+            cmd_out: Some(cmd_out),
+            session_handle: Some(handle),
+        }
+    }
 
-        let mut peer = Peer::new(None, info.addr);
-        peer.connect(info_hash, None).await.unwrap();
+    pub fn new_outbound(mut session: PeerSession, cmd_out: UnboundedSender<PeerCommand>) -> Peer {
+        let handle = tokio::spawn(async move {
+            session.start_session_outbound().await
+        });
+        Peer::new(cmd_out, handle)
+    }
+
+    pub fn new_inbound(mut session: PeerSession, cmd_out: UnboundedSender<PeerCommand>, socket: TcpStream) -> Peer {
+        let handle = tokio::spawn(async move {
+            session.start_session_inbound(socket).await
+        });
+        Peer::new(cmd_out, handle)
     }
 }

@@ -1,9 +1,13 @@
-#![allow(dead_code, unused_imports)]
+#![allow(dead_code)]
 
+pub mod metainfo;
 pub mod torrent;
-pub mod data;
 pub mod tracker;
 pub mod p2p;
 pub mod fs;
-pub mod state;
-use p2p::peer;
+pub mod block;
+pub mod ctx;
+pub mod stats;
+pub mod piece_selector;
+
+pub type Bitfield = bitvec::vec::BitVec<u8, bitvec::order::Msb0>;
