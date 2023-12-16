@@ -4,7 +4,7 @@ use bencode::{decode_bytes, encode_to_raw};
 use url::Url;
 
 #[derive(Debug, thiserror::Error)]
-pub enum InfoError {
+pub enum MetaInfoError {
 
     #[error("bencode error: {0}")]
     BencodeError(#[from] bencode::Error),
@@ -18,9 +18,15 @@ pub enum InfoError {
     #[error("invalid piece length, must be divisible by 20")]
     InvalidPieceLength,
 
+    #[error("file has size 0")]
+    FileNoSize,
+
+    #[error("file has no path")]
+    FileEmptyPath,
+    
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq, Clone)]
 pub struct File {
 
     // A list containing one or more string elements that together represent the path and filename
@@ -67,10 +73,6 @@ pub struct Info {
     // "0" or is not present, the client may obtain peer from other means, e.g. PEX peer exchange, dht.
     #[serde(default)]
     pub private: Option<u8>,
-
-    // A list containing one or more string elements that together represent the path and filename.
-    #[serde(default)]
-    pub path: Option<Vec<String>>,
 
     #[serde(default)]
     #[serde(rename = "root hash")]
@@ -122,22 +124,58 @@ pub struct MetaInfo {
 
 impl MetaInfo {
 
-    pub fn new<P: AsRef<std::path::Path>>(path: P) -> Result<MetaInfo, InfoError> {
+    pub fn new<P: AsRef<std::path::Path>>(path: P) -> Result<MetaInfo, MetaInfoError> {
         
         if path.as_ref().extension().unwrap_or_default() != "torrent" {
-            return Err(InfoError::InvalidExtension);
+            return Err(MetaInfoError::InvalidExtension);
         }
 
         let raw = std::fs::read(path)?;
         let mut metainfo: MetaInfo = decode_bytes(&raw)?;
         
         if metainfo.info.pieces.len() % 20 != 0 {
-            return Err(InfoError::InvalidPieceLength);
+            return Err(MetaInfoError::InvalidPieceLength);
+        }
+
+        // Ensure that some file exists and have size, whether single file or multifile.
+        if let Some(len) = metainfo.info.length {
+            if len == 0 { return Err(MetaInfoError::FileNoSize) }
+            
+        } else if let Some(files) = &metainfo.info.files {
+            for file in files {
+                if file.path.is_empty() { return Err(MetaInfoError::FileEmptyPath) }
+                else if file.length == 0 { return Err(MetaInfoError::FileEmptyPath) }
+            }
+
+        } else {
+            return Err(MetaInfoError::FileEmptyPath);
         }
 
         metainfo.info_hash = metainfo.info.info_hash()?;
         tracing::debug!("MetaInfo created: {:#?}", metainfo);
         Ok(metainfo)
+    }
+
+    pub fn files(&self) -> Vec<crate::fs::File> {
+        let mut files = vec![];
+        if let Some(len) = self.info.length {
+            files.push(crate::fs::File {
+                path: std::path::PathBuf::from(self.info.name.clone()),
+                length: len,
+                offset: 0,
+            })
+        } else {
+            let mut offset = 0;
+            self.info.files.clone().unwrap().into_iter().for_each(|file| {
+                files.push(crate::fs::File {
+                    path: file.path.into_iter().collect(),
+                    length: file.length,
+                    offset,
+                });
+                offset += file.length as usize;
+            });
+        }
+        files
     }
 
     pub fn creation_date_fmt(&self) -> Option<String> {
@@ -180,7 +218,7 @@ impl MetaInfo {
 
 impl Info {
     // Calculates the sha1 hash of info dict to verify torrent integrity.
-    fn info_hash(&self) -> Result<[u8; 20], InfoError> {
+    fn info_hash(&self) -> Result<[u8; 20], MetaInfoError> {
         use sha1::Digest;
         let mut hasher = sha1::Sha1::new();
         // Serialize info dict into bencode.
@@ -287,7 +325,6 @@ impl std::fmt::Debug for Info {
             .field("length", &self.length)
             .field("files", &self.files)
             .field("private", &self.private)
-            .field("path", &self.path)
             .field("root_hash", &self.root_hash)
             .finish()
     }
@@ -299,7 +336,8 @@ mod tests {
 
     #[test]
     fn test_metainfo() {
-        let metainfo = MetaInfo::new("../test_torrents/test.torrent").unwrap();
-        println!("{:#?}", metainfo); 
+        let metainfo = MetaInfo::new("../test_torrents/test_multi.torrent").unwrap();
+        println!("{:#?}", metainfo);
+        println!("{:#?}", metainfo.files());
     }
 }

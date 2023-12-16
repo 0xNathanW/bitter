@@ -10,23 +10,23 @@ pub enum Error {
     IoError(std::io::Error),
 
     // Attempted to deserialize an invalid type.
-    #[error("Invalid type: {0}")]
+    #[error("invalid type: {0}")]
     InvalidType(String),
 
     // Type valid but unexpected token.
-    #[error("Invalid token: expected: {expected:?}, found: {found:?}")]    
+    #[error("invalid token: expected: {expected:?}, found: {found:?}")]    
     InvalidToken {
         expected: String,
         found: String,
     },
 
-    #[error("Map serialization error: {0}")]
+    #[error("map serialization error: {0}")]
     MapSerializationOrder(String),
 
     #[error("{0}")]
     Custom(String),
 
-    #[error("Expected end of input stream")]
+    #[error("expected end of input stream")]
     EOF,
 
 }

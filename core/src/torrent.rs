@@ -6,14 +6,13 @@ use std::{
 };
 use rand::seq::SliceRandom;
 use tokio::sync::{mpsc::{self, UnboundedReceiver}, RwLock};
-use tracing::Instrument;
 use crate::{
     ctx::TorrentContext,
     p2p::{session::PeerSession, peer::Peer},
     tracker::{Tracker, Event, AnnounceParams, TrackerError},
     metainfo::MetaInfo, 
     stats::Stats, 
-    piece_selector::PieceSelector,
+    piece_selector::PieceSelector, fs::File,
 };
 
 // More aggressively search for peers when num < MIN_PEERS_PER_TORRENT
@@ -68,6 +67,9 @@ pub struct Torrent {
     // Statistics for upload/download etc.
     stats: Stats,
 
+    // Files for the torrent.
+    files: Vec<File>,
+
     // Address to listen for incoming connections on.
     listen_address: SocketAddr,
 
@@ -112,6 +114,7 @@ impl Torrent {
             cmd_rx,
             start_time: None,
             stats: Stats::default(),
+            files: metainfo.files(),
             listen_address,
         }
     }
@@ -122,7 +125,7 @@ impl Torrent {
         // Announce start event to trackers.
         self.announce(Some(Event::Started), Instant::now()).await?;
         // Run until there is an error.
-        self.run().await?;
+        // self.run().await?;
         Ok(())
     }
 
@@ -135,6 +138,7 @@ impl Torrent {
             for tracker in tier {
 
                 let num_peers = self.peers.len() + self.available.len();
+                // Number of peers we absolutely require.
                 let num_peers_essential = if num_peers >= MIN_PEERS_PER_TORRENT || event == Some(Event::Stopped) {
                     None
                 } else {
@@ -155,40 +159,9 @@ impl Torrent {
                         num_want: num_peers_essential,
                         tracker_id: tracker.tracker_id.clone(),
                     };
-                    tracing::debug!("announce params: {:#?}", params);
 
-                    match tracker.send_announce(params).await {
-                        
-                        Err(e) => {
-                            tracing::warn!("failed sending announce to {}: {}", tracker.url, e);
-                        },
-
-                        Ok(resp) => {
-
-                            tracing::debug!("announce response from {}: {:#?}", tracker.url, resp);
-                            
-                            if let Some(failure) = resp.failure_reason {
-                                tracing::warn!("tracker failure from {}: {}", tracker.url, failure);
-                            }
-                            if let Some(warning) = resp.warning_message {
-                                tracing::warn!("tracker warning message from {}: {}", tracker.url, warning);
-                            }
-
-                            if let Some(interval) = resp.interval {
-                                tracker.interval = Some(Duration::from_secs(interval));
-                            }
-                            if let Some(min_interval) = resp.min_interval {
-                                tracker.min_interval = Some(Duration::from_secs(min_interval));
-                            }
-                            if let Some(tracker_id) = resp.tracker_id {
-                                tracker.tracker_id = Some(tracker_id);
-                            }
-                            
-                            tracing::info!("{} provided {} peers", tracker.url, resp.peers.len());
-                            self.available.extend(resp.peers.into_iter());
-                        }
-                    }
-                    
+                    let peers = tracker.send_announce(params).await?;
+                    self.available.extend(peers.into_iter());
                     tracker.last_announce = Some(time);
                 }
 

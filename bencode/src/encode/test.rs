@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use serde::{Serialize, ser::SerializeStruct, Serializer};
 use serde_derive::Serialize;
-
 use super::encode_to_str;
 
 #[test]

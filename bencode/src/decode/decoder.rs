@@ -4,7 +4,6 @@ use serde::{
     forward_to_deserialize_any,
     de::Deserializer,
 };
-
 use crate::error::{Error, Result};
 use super::DecodedType;
 use super::access::Access;

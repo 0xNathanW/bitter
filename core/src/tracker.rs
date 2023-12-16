@@ -1,7 +1,4 @@
-use std::{
-    net::{SocketAddr, IpAddr, Ipv4Addr}, 
-    time::{Instant, Duration},
-};
+use std::{net::{SocketAddr, IpAddr, Ipv4Addr}, time::{Instant, Duration}};
 use bytes::Buf;
 use reqwest::{Client, Url};
 use serde::de;
@@ -14,27 +11,18 @@ pub type Result<T> = std::result::Result<T, TrackerError>;
 
 #[derive(thiserror::Error, Debug)]
 pub enum TrackerError {
+
     #[error("tracker request error: {0}")]
     ReqwestError(#[from] reqwest::Error),
-
-    #[error("error parsing tracker url: {0}")]
-    UrlParseError(#[from] url::ParseError),
 
     #[error("error deserializing tracker response: {0}")]
     BencodeError(#[from]bencode::Error),
 
-    #[error("tracker Error: code({code:?}), {msg:?}")]
-    TrackerError {
-        msg: String,
-        code: Option<u64>,
-    },
-
-    #[error("Error: {0}")]
-    Custom(String),
 }
 
 #[derive(Debug)]
 pub struct Tracker {
+
     // HTTP client.
     client: Client,
 
@@ -52,6 +40,7 @@ pub struct Tracker {
 
     // Minimum interval for next announce request.
     pub min_interval: Option<Duration>,
+
 }
 
 impl Tracker {
@@ -68,7 +57,9 @@ impl Tracker {
     }
 
     // Sends announce to tracker.
-    pub async fn send_announce(&self, params: AnnounceParams) -> Result<TrackerResponse> {
+    #[tracing::instrument(skip(params, self), fields(url = self.url.as_str()))]
+    pub async fn send_announce(&mut self, params: AnnounceParams) -> Result<Vec<SocketAddr>> {
+        tracing::debug!("announce params: {:#?}", params);
 
         let mut url = format!(
             "{}?info_hash={}&peer_id={}&port={}&uploaded={}&downloaded={}&left={}&compact=1",
@@ -97,8 +88,27 @@ impl Tracker {
             .bytes()
             .await?;
         let resp: TrackerResponse = bencode::decode_bytes(&raw_resp)?;
+        tracing::debug!("announce response: {:#?}", resp);
         
-        Ok(resp)
+        if let Some(failure) = resp.failure_reason {
+            tracing::warn!("failure: {}", failure);
+        }
+        if let Some(warning) = resp.warning_message {
+            tracing::warn!("warning: {}", warning);
+        }
+
+        if let Some(interval) = resp.interval {
+            self.interval = Some(Duration::from_secs(interval));
+        }
+        if let Some(min_interval) = resp.min_interval {
+            self.min_interval = Some(Duration::from_secs(min_interval));
+        }
+        if let Some(tracker_id) = resp.tracker_id {
+            self.tracker_id = Some(tracker_id);
+        }
+
+        tracing::info!("provided {} peers", resp.peers.len());
+        Ok(resp.peers)
     }
 
     // Returns true if time since last announce is greater than interval.
@@ -120,7 +130,7 @@ impl Tracker {
         if let Some(last_announce) = self.last_announce {
             time.duration_since(last_announce) 
             >= self.min_interval.unwrap_or(Duration::from_secs(DEFAULT_MIN_ANNOUNCE_INTERVAL))
-        
+
         // If we haven't announced yet.
         } else {
             true
@@ -240,9 +250,7 @@ where
         {   
             
             if v.len() % 6 != 0 {
-                return Err(
-                    TrackerError::Custom("Peer string length not a multiple of 6".to_string()
-                )).map_err(E::custom);
+                return Err(E::custom("peer string not multiple of 6"));
             }
 
             let num_peers = v.len() / 6;
@@ -303,7 +311,6 @@ mod tests {
         assert_eq!(response.incomplete, Some(1));
 
         assert!(response.peers.contains(&SocketAddr::new(IpAddr::V4(Ipv4Addr::new(97, 117, 154, 184)), 5000)));
-
         assert!(response.peers.contains(&SocketAddr::new(IpAddr::V4(Ipv4Addr::new(5, 135, 159, 46)), 51413)));
     }
 }
