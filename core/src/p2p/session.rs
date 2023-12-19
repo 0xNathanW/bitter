@@ -5,7 +5,7 @@ use futures::{SinkExt, StreamExt, stream::SplitSink};
 use crate::{
     ctx::TorrentContext, 
     p2p::{handshake::{HandshakeCodec, PROTOCOL}, PeerError, 
-    message::MessageCodec, state::ConnState}, torrent::TorrentCommand, Bitfield, block::BlockInfo, 
+    message::MessageCodec, state::ConnState}, torrent::CommandToTorrent, Bitfield, block::BlockInfo, 
 };
 use super::{Result, handshake::Handshake, state::SessionState, message::Message};
 
@@ -20,7 +20,7 @@ pub enum PeerState {
 }
 
 // Commands that can be sent to a peer.
-pub enum PeerCommand {
+pub enum CommandToPeer {
 
     // Safely shutdown the peer session.
     Shutdown,
@@ -42,10 +42,10 @@ pub struct PeerSession {
     torrent_ctx: Arc<TorrentContext>,
     
     // Commands to the peer.
-    cmd_rx: UnboundedReceiver<PeerCommand>,
+    cmd_rx: UnboundedReceiver<CommandToPeer>,
     
     // Internal send channel for disk reads.
-    cmd_tx: UnboundedSender<PeerCommand>,
+    cmd_tx: UnboundedSender<CommandToPeer>,
 
     // The peer's ID will be set after the handshake.
     id: Option<[u8; 20]>,
@@ -64,11 +64,12 @@ pub struct PeerSession {
 
     // Pending block requests from client to peers.
     block_requests_out: HashSet<BlockInfo>,
+
 }
 
 impl PeerSession {
 
-    pub fn new(address: SocketAddr, torrent_ctx: Arc<TorrentContext>) -> (PeerSession, UnboundedSender<PeerCommand>) {
+    pub fn new(address: SocketAddr, torrent_ctx: Arc<TorrentContext>) -> (PeerSession, UnboundedSender<CommandToPeer>) {
         let (cmd_tx, cmd_rx) = tokio::sync::mpsc::unbounded_channel();
         let num_pieces = torrent_ctx.num_pieces;
         (
@@ -88,22 +89,18 @@ impl PeerSession {
         )
     }
 
-    #[tracing::instrument(name = "peer", skip(self), fields(address = %self.address, outbound = "true"))]
-    pub async fn start_session_outbound(&mut self) -> Result<()> {
-        
+    #[tracing::instrument(name = "peer", skip(self, inbound_stream), fields(address = %self.address))]
+    pub async fn start_session(&mut self, inbound_stream: Option<TcpStream>) -> Result<()> {
         self.state.conn_state = ConnState::Connecting;
-        let socket = TcpStream::connect(self.address).await?;
-        tracing::info!("connection successful");
-        
-        let socket = Framed::new(socket, HandshakeCodec);
-        self.establish_peer(socket, false).await
-    }
-
-    #[tracing::instrument(name = "peer", skip(self, socket), fields(address = %self.address, outbound = "false"))]
-    pub async fn start_session_inbound(&mut self, socket: TcpStream) -> Result<()> {
-        self.state.conn_state = ConnState::Connecting;
-        let socket = Framed::new(socket, HandshakeCodec);
-        self.establish_peer(socket, true).await
+        let inbound = inbound_stream.is_some();
+        let socket = if let Some(stream) = inbound_stream {
+            Framed::new(stream, HandshakeCodec)
+        } else {
+            let stream = TcpStream::connect(self.address).await?;
+            tracing::trace!("outbound connection successful");
+            Framed::new(stream, HandshakeCodec)
+        };
+        self.establish_peer(socket, inbound).await
     }
 
     async fn establish_peer(&mut self, mut socket: Framed<TcpStream, HandshakeCodec>, inbound: bool) -> Result<()> {
@@ -126,11 +123,11 @@ impl PeerSession {
             
             // Validate handshake.
             if handshake.protocol != PROTOCOL {
-                tracing::warn!("incorrect protocol");
+                tracing::warn!("incorrect protocol in handshake");
                 return Err(PeerError::IncorrectProtocol);
             }
             if handshake.info_hash != self.torrent_ctx.info_hash {
-                tracing::info!("incorrect info hash");
+                tracing::info!("incorrect info hash in handshake");
                 return Err(PeerError::IncorrectInfoHash);
             }
             self.id = Some(handshake.peer_id);
@@ -147,7 +144,7 @@ impl PeerSession {
             socket.map_codec(|_| MessageCodec);
 
             // Notify context that peer is connected.
-            self.torrent_ctx.cmd_tx.send(TorrentCommand::PeerConnected {
+            self.torrent_ctx.cmd_tx.send(CommandToTorrent::PeerConnected {
                 address: self.address,
                 id: handshake.peer_id,
             })?;
@@ -171,10 +168,10 @@ impl PeerSession {
 
         {
             let guard = self.torrent_ctx.piece_selector.read().await;
-            let self_pieces = guard.self_pieces();
-            if self_pieces.any() {
+            let own_bitfield = guard.own_bitfield();
+            if own_bitfield.any() {
                 tracing::info!("sending bitfield");
-                sink.send(Message::Bitfield(self_pieces.clone())).await?;
+                sink.send(Message::Bitfield(own_bitfield.clone())).await?;
             }
         }
 
@@ -204,15 +201,18 @@ impl PeerSession {
         mut bitfield: Bitfield,
     ) -> Result<()> {
         tracing::debug!("bitfield: {:?}", bitfield);
+
         // Get rid of trailing values.
         bitfield.resize(self.torrent_ctx.num_pieces, false);
         tracing::info!("recieved bitfield with {} pieces", bitfield.count_ones());
         let interested = self.torrent_ctx.piece_selector.write().await.bitfield_update(&bitfield);
+        
         self.bitfield = bitfield;
         self.piece_count = self.piece_count.count_ones() as usize;
         self.update_interest(sink, interested).await
     }
 
+    // Generic message handler.
     async fn handle_msg(
         &mut self,
         sink: &mut SplitSink<Framed<TcpStream, MessageCodec>, Message>,
@@ -221,15 +221,15 @@ impl PeerSession {
 
         match msg {
             Message::Bitfield(_) => {
-                tracing::warn!("bitfield sent before handshake");
+                tracing::warn!("unexpected bitfield");
                 return Err(PeerError::UnexpectedBitfield);
             },
             Message::KeepAlive => tracing::info!("keep alive"),
             Message::Choke => {
                 if !self.state.peer_choking {
                     tracing::info!("peer now choking us");
-                    // free pending blocks.
                     self.state.peer_choking = true;
+                    // free pending blocks.
                 }
             },
             Message::Unchoke => {
@@ -238,7 +238,7 @@ impl PeerSession {
                     self.state.peer_choking = false;
 
                     if self.state.interested {
-                        self.prepare_download();
+                        // self.prepare_download();
                         // make requests
                     }
                 }
@@ -266,11 +266,6 @@ impl PeerSession {
         }
 
         Ok(())
-    }
-
-    // Called after unchoked and are interested.
-    fn prepare_download(&mut self) {
-
     }
 
     async fn make_requests(

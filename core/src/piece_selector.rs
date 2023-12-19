@@ -22,7 +22,7 @@ pub struct PieceSelector {
     pieces: Vec<PieceInfo>,
 
     // Tracks pieces the client already has.
-    self_pieces: Bitfield,
+    own_bitfield: Bitfield,
 
     // Number of pieces not yet recieved may be pending.
     missing: usize,
@@ -37,14 +37,14 @@ impl PieceSelector {
     pub fn new(num_pieces: usize) -> PieceSelector {
         PieceSelector {
             pieces: vec![PieceInfo::default(); num_pieces],
-            self_pieces: Bitfield::with_capacity(num_pieces),
+            own_bitfield: Bitfield::with_capacity(num_pieces),
             missing: num_pieces,
             free: num_pieces,
         }
     }
 
-    pub fn self_pieces(&self) -> &Bitfield {
-        &self.self_pieces
+    pub fn own_bitfield(&self) -> &Bitfield {
+        &self.own_bitfield
     }
 
     pub fn all_picked(&self) -> bool {
@@ -54,17 +54,17 @@ impl PieceSelector {
     // After a "have" msg increment piece freq, returns if we are interested in the piece.
     pub fn update_piece_availability(&mut self, idx: usize) -> bool {
         self.pieces[idx].frequency += 1;
-        *self.self_pieces.get(idx).unwrap()
+        *self.own_bitfield.get(idx).unwrap()
     }
 
     // Updates pieces freq when given entire bitfield, returns interested if they have at least one piece we don't.
     pub fn bitfield_update(&mut self, bitfield: &Bitfield) -> bool {
-        debug_assert!(self.self_pieces.len() == bitfield.len());
+        debug_assert!(self.own_bitfield.len() == bitfield.len());
         let mut interested = false;
         for idx in 0..bitfield.len() {
             if *bitfield.get(idx).unwrap() {
                 self.pieces[idx].frequency += 1;
-                if !interested && !self.self_pieces.get(idx).unwrap() {
+                if !interested && !self.own_bitfield.get(idx).unwrap() {
                     interested = true;
                 }
             }
@@ -73,16 +73,16 @@ impl PieceSelector {
     }
 
     pub fn add_downloaded_piece(&mut self, idx: usize) {
-        debug_assert!(!self.self_pieces.get(idx).unwrap());
-        self.self_pieces.set(idx, true);
+        debug_assert!(!self.own_bitfield.get(idx).unwrap());
+        self.own_bitfield.set(idx, true);
         self.missing -= 1;
     }
 
     // TODO: update to rarest.
     pub fn select_piece(&mut self) -> Option<usize> {
         
-        for idx in 0..self.self_pieces.len() {
-            if !self.self_pieces.get(idx).unwrap() && self.pieces[idx].frequency != 0 && !self.pieces[idx].is_pending {
+        for idx in 0..self.own_bitfield.len() {
+            if !self.own_bitfield.get(idx).unwrap() && self.pieces[idx].frequency != 0 && !self.pieces[idx].is_pending {
 
                 self.pieces[idx].is_pending = true;
                 self.free -= 1;

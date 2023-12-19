@@ -57,7 +57,7 @@ impl Tracker {
     }
 
     // Sends announce to tracker.
-    #[tracing::instrument(skip(params, self), fields(url = self.url.as_str()))]
+    #[tracing::instrument(skip(params, self), fields(url = %self.url))]
     pub async fn send_announce(&mut self, params: AnnounceParams) -> Result<Vec<SocketAddr>> {
         tracing::debug!("announce params: {:#?}", params);
 

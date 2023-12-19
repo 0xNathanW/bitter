@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use tokio::sync::{mpsc::UnboundedSender, RwLock};
-use crate::{torrent::TorrentCommand, piece_selector::PieceSelector};
+use crate::{torrent::CommandToTorrent, piece_selector::PieceSelector};
 
 #[derive(Debug)]
 pub struct TorrentContext {
@@ -20,6 +20,6 @@ pub struct TorrentContext {
     pub total_size:     u64,
 
     // Commands to the peer.
-    pub cmd_tx:        UnboundedSender<TorrentCommand>,
+    pub cmd_tx:        UnboundedSender<CommandToTorrent>,
     
 }

@@ -1,12 +1,15 @@
+use std::path::{Path, PathBuf};
 use serde::{de, Deserialize};
 use serde_derive::{Deserialize, Serialize};
 use bencode::{decode_bytes, encode_to_raw};
 use url::Url;
 
+use crate::fs::File;
+
 #[derive(Debug, thiserror::Error)]
 pub enum MetaInfoError {
 
-    #[error("bencode error: {0}")]
+    #[error("bencode error whilst decoding metainfo: {0}")]
     BencodeError(#[from] bencode::Error),
 
     #[error("invalid file extension, expected .torrent")]
@@ -18,16 +21,16 @@ pub enum MetaInfoError {
     #[error("invalid piece length, must be divisible by 20")]
     InvalidPieceLength,
 
-    #[error("file has size 0")]
+    #[error("file(s) with size 0")]
     FileNoSize,
 
-    #[error("file has no path")]
+    #[error("file(s) with no path")]
     FileEmptyPath,
     
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq, Clone)]
-pub struct File {
+pub struct RawFile {
 
     // A list containing one or more string elements that together represent the path and filename
     pub path: Vec<String>,
@@ -66,7 +69,7 @@ pub struct Info {
 
     // A list of dictionaries, one for each file.
     #[serde(default)]
-    pub files: Option<Vec<File>>,
+    pub files: Option<Vec<RawFile>>,
     
     // If it is set to "1", the client MUST publish its presence to get other peers ONLY 
     // via the trackers explicitly described in the metainfo file. If this field is set to 
@@ -124,7 +127,7 @@ pub struct MetaInfo {
 
 impl MetaInfo {
 
-    pub fn new<P: AsRef<std::path::Path>>(path: P) -> Result<MetaInfo, MetaInfoError> {
+    pub fn new<P: AsRef<Path>>(path: P) -> Result<MetaInfo, MetaInfoError> {
         
         if path.as_ref().extension().unwrap_or_default() != "torrent" {
             return Err(MetaInfoError::InvalidExtension);
@@ -137,16 +140,16 @@ impl MetaInfo {
             return Err(MetaInfoError::InvalidPieceLength);
         }
 
-        // Ensure that some file exists and have size, whether single file or multifile.
-        if let Some(len) = metainfo.info.length {
-            if len == 0 { return Err(MetaInfoError::FileNoSize) }
-            
-        } else if let Some(files) = &metainfo.info.files {
+        // Multi file.
+        if let Some(files) = &metainfo.info.files {
             for file in files {
                 if file.path.is_empty() { return Err(MetaInfoError::FileEmptyPath) }
-                else if file.length == 0 { return Err(MetaInfoError::FileEmptyPath) }
+                else if file.length == 0 { return Err(MetaInfoError::FileNoSize) }
             }
-
+        }
+        // Single file.
+        if let Some(len) = metainfo.info.length {
+            if len == 0 { return Err(MetaInfoError::FileNoSize) }
         } else {
             return Err(MetaInfoError::FileEmptyPath);
         }
@@ -156,18 +159,18 @@ impl MetaInfo {
         Ok(metainfo)
     }
 
-    pub fn files(&self) -> Vec<crate::fs::File> {
+    pub fn files(&self) -> Vec<File> {
         let mut files = vec![];
         if let Some(len) = self.info.length {
-            files.push(crate::fs::File {
-                path: std::path::PathBuf::from(self.info.name.clone()),
+            files.push(File {
+                path: PathBuf::from(self.info.name.clone()),
                 length: len,
                 offset: 0,
             })
         } else {
             let mut offset = 0;
             self.info.files.clone().unwrap().into_iter().for_each(|file| {
-                files.push(crate::fs::File {
+                files.push(File {
                     path: file.path.into_iter().collect(),
                     length: file.length,
                     offset,
@@ -193,7 +196,7 @@ impl MetaInfo {
     pub fn num_pieces(&self) -> usize { self.info.pieces.len() / 20 }
 
     pub fn is_private(&self) -> bool { self.info.private == Some(1) }
-    
+
     pub fn is_multi_file(&self) -> bool { self.info.files.is_some() }
 
     pub fn total_size(&self) -> u64 {
@@ -226,20 +229,6 @@ impl Info {
         hasher.update(info_data);
         Ok(hasher.finalize().into())
     }    
-}
-
-impl File {
-    pub fn path(&self) -> String {
-        self.path.join("/")
-    }
-
-    pub fn size_fmt(&self) -> String {
-        format_size(self.length)
-    }
-
-    pub fn md5sum(&self) -> Option<&str> {
-        self.md5sum.as_deref()
-    }
 }
 
 fn format_size(bytes: u64) -> String {
