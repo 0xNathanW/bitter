@@ -1,7 +1,7 @@
 use std::{fmt::Debug, sync::Arc, net::SocketAddr, collections::HashSet};
 use tokio::{sync::mpsc::{UnboundedReceiver, UnboundedSender}, net::TcpStream};
 use tokio_util::codec::Framed;
-use futures::{SinkExt, StreamExt, stream::SplitSink};
+use futures::{SinkExt, StreamExt, stream::{SplitSink, SplitStream}};
 use crate::{
     ctx::TorrentContext, 
     p2p::{handshake::{HandshakeCodec, PROTOCOL}, PeerError, 
@@ -89,6 +89,17 @@ impl PeerSession {
         )
     }
 
+    // TODO: add stat changes onto read/write functions.
+    fn on_read_message(&mut self, msg: &Message) {
+        tracing::info!("read: {}", msg);
+    }
+
+    async fn write_message(&mut self, sink: &mut SplitSink<Framed<TcpStream, MessageCodec>, Message>, msg: Message) -> Result<()> {
+        tracing::info!("send: {}", msg);
+        sink.send(msg).await?;
+        Ok(())
+    }
+    
     #[tracing::instrument(name = "peer", skip(self, inbound_stream), fields(address = %self.address))]
     pub async fn start_session(&mut self, inbound_stream: Option<TcpStream>) -> Result<()> {
         self.state.conn_state = ConnState::Connecting;
@@ -141,7 +152,7 @@ impl PeerSession {
             }
 
             // Switch from handshake to message codec.
-            socket.map_codec(|_| MessageCodec);
+            let msg_socket = socket.map_codec(|_| MessageCodec);
 
             // Notify context that peer is connected.
             self.torrent_ctx.cmd_tx.send(CommandToTorrent::PeerConnected {
@@ -151,7 +162,7 @@ impl PeerSession {
             tracing::info!("handshake successful");
 
             self.state.conn_state = ConnState::Introducing;
-            // TODO: run
+            self.run(msg_socket).await?;
         } else {
             self.state.conn_state = ConnState::Disconnected;
             tracing::warn!("no handshake recieved")
@@ -163,29 +174,21 @@ impl PeerSession {
     }
 
     async fn run(&mut self, socket: Framed<TcpStream, MessageCodec>) -> Result<()> {
-        
         let (mut sink, mut stream) = socket.split();
-
-        {
-            let guard = self.torrent_ctx.piece_selector.read().await;
-            let own_bitfield = guard.own_bitfield();
-            if own_bitfield.any() {
-                tracing::info!("sending bitfield");
-                sink.send(Message::Bitfield(own_bitfield.clone())).await?;
-            }
-        }
 
         loop { tokio::select! {
 
             Some(msg) = stream.next() =>{
                 let msg = msg?;
-
+                self.on_read_message(&msg);
                 if self.state.conn_state == ConnState::Introducing {
                     if let Message::Bitfield(bitfield) = msg {
                         self.handle_bitfield(&mut sink, bitfield).await?;
                     } else {
                         self.handle_msg(&mut sink, msg).await?;
                     }
+                } else {
+                    self.handle_msg(&mut sink, msg).await?;
                 }
             }
 
@@ -201,12 +204,8 @@ impl PeerSession {
         mut bitfield: Bitfield,
     ) -> Result<()> {
         tracing::debug!("bitfield: {:?}", bitfield);
-
-        // Get rid of trailing values.
         bitfield.resize(self.torrent_ctx.num_pieces, false);
-        tracing::info!("recieved bitfield with {} pieces", bitfield.count_ones());
-        let interested = self.torrent_ctx.piece_selector.write().await.bitfield_update(&bitfield);
-        
+        let interested = self.torrent_ctx.picker.piece_picker.write().await.bitfield_update(&bitfield);
         self.bitfield = bitfield;
         self.piece_count = self.piece_count.count_ones() as usize;
         self.update_interest(sink, interested).await
@@ -224,73 +223,92 @@ impl PeerSession {
                 tracing::warn!("unexpected bitfield");
                 return Err(PeerError::UnexpectedBitfield);
             },
-            Message::KeepAlive => tracing::info!("keep alive"),
+            Message::KeepAlive => {},
             Message::Choke => {
                 if !self.state.peer_choking {
-                    tracing::info!("peer now choking us");
                     self.state.peer_choking = true;
                     // free pending blocks.
                 }
             },
             Message::Unchoke => {
                 if self.state.peer_choking {
-                    tracing::info!("peer no longer choking us");
                     self.state.peer_choking = false;
-
+                    // Start to make requests if we are interested.
                     if self.state.interested {
-                        // self.prepare_download();
-                        // make requests
+                        self.make_requests(sink).await?;
                     }
                 }
             },
             Message::Interested => {
                 if !self.state.peer_interested {
-                    tracing::info!("peer became interested");
                     self.state.peer_interested = true;
+                    self.write_message(sink, Message::Unchoke).await?;
                     self.state.choked = false;
-                    tracing::info!("unchoking peer");
-                    sink.send(Message::Unchoke).await?;
                 }
             },
             Message::NotInterested => {
                 if self.state.peer_interested {
-                    tracing::info!("peer no longer interested");
                     self.state.peer_interested = false;
                 }
             },
             Message::Piece { idx, begin, block } => {},
-            Message::Request { idx, begin, length } => {},
+            Message::Request(block) => {},
             Message::Have { idx } => {},
             Message::Port { port } => {},
-            Message::Cancel { idx, begin, length } => {},
+            Message::Cancel(block) => {},
         }
 
         Ok(())
     }
 
+    async fn handle_block(
+        &mut self,
+        piece_idx: usize,
+        offset: usize,
+        block: Vec<u8>,
+    ) -> Result<()> {
+        let block = BlockInfo {
+            piece_idx,
+            offset,
+            len: block.len() as u32,
+        }
+        self.block_requests_out.remove(&block);
+
+        Ok(())    
+    }
+    
+    // Queue requests up to a certain target queue length.
     async fn make_requests(
         &mut self,
         sink: &mut SplitSink<Framed<TcpStream, MessageCodec>, Message>,
     ) -> Result<()> {
-        
-        Ok(())        
+        if self.state.peer_choking {
+            return Ok(())
+        }
+        if !self.state.interested {
+            return Ok(())
+        }
+        let requests = self.torrent_ctx.picker.pick_blocks(&self.block_requests_out, 4).await;
+        for block in requests.into_iter() {
+            self.block_requests_out.insert(block);
+            self.write_message(sink, Message::Request(block)).await?;
+        }
+        Ok(())
     }
-
+    
+    // Send message to peer if we become interested.
     async fn update_interest(
         &mut self,
         sink: &mut SplitSink<Framed<TcpStream, MessageCodec>, Message>,
         interested: bool,
     ) -> Result<()> {
-        
+        // Become interested.
         if !self.state.interested && interested {
             self.state.interested = true;
-            tracing::info!("interested in peer");
-            sink.send(Message::Interested).await?;
+            self.write_message(sink, Message::Interested).await?;
         } else if self.state.interested && !interested {
             self.state.interested = false;
-            tracing::info!("disinterested in peer");
         }
-        
         Ok(())
     }
 }

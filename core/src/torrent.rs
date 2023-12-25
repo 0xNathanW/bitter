@@ -11,8 +11,7 @@ use crate::{
     p2p::{session::PeerSession, peer::PeerHandle},
     tracker::{Tracker, Event, AnnounceParams, TrackerError},
     metainfo::MetaInfo, 
-    stats::Stats, 
-    piece_selector::PieceSelector, fs::File,
+    fs::File, picker::Picker, 
 };
 
 // More aggressively search for peers when num < MIN_PEERS_PER_TORRENT
@@ -60,9 +59,6 @@ pub struct Torrent {
     // Time when torrent started.
     start_time: Option<Instant>,
 
-    // Statistics for upload/download etc.
-    stats: Stats,
-
     // Files for the torrent.
     files: Vec<File>,
 
@@ -103,7 +99,7 @@ impl Torrent {
                 TorrentContext {
                     info_hash: metainfo.info_hash,
                     client_id: config.client_id,
-                    piece_selector: Arc::new(RwLock::new(PieceSelector::new(metainfo.num_pieces()))),
+                    picker: Picker::new(metainfo.num_pieces(), metainfo.info.piece_length as u32),
                     total_size: metainfo.total_size(),
                     num_pieces: metainfo.num_pieces(),
                     cmd_tx: cmd_tx.clone(),
@@ -114,7 +110,6 @@ impl Torrent {
             available: Vec::new(),
             cmd_rx,
             start_time: None,
-            stats: Stats::default(),
             files: metainfo.files(),
             listen_address: config.listen_address,
         }
@@ -126,7 +121,7 @@ impl Torrent {
         // Announce start event to trackers.
         self.announce(Some(Event::Started), Instant::now()).await?;
         // Run until there is an error.
-        // self.run().await?;
+        self.run().await?;
         Ok(())
     }
 
@@ -152,10 +147,12 @@ impl Torrent {
                     let params = AnnounceParams {
                         info_hash: self.ctx.info_hash,
                         peer_id: self.ctx.client_id,
-                        port: DEFAULT_PORT,
-                        uploaded: self.stats.uploaded,
-                        downloaded: self.stats.downloaded,
-                        left: self.ctx.total_size - self.stats.downloaded,
+                        // TODO: Change to config.
+                        port: 6881,
+                        // TODO change all with relation to stats.
+                        uploaded: 0,
+                        downloaded: 0,
+                        left: self.ctx.total_size,
                         event,
                         num_want: num_peers_essential,
                         tracker_id: tracker.tracker_id.clone(),

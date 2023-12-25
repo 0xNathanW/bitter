@@ -1,7 +1,7 @@
 use std::io::Cursor;
 use bytes::{BufMut, Buf};
 use tokio_util::codec::{Encoder, Decoder};
-use crate::Bitfield;
+use crate::{Bitfield, block::BlockInfo};
 
 use super::PeerError;
 
@@ -34,14 +34,10 @@ pub enum Message {
     Bitfield(Bitfield),
 
     // When a client wants to request data, they reference the index of the piece, the index 
-    // of the start of the block within the piece, and the length of the block (usually 16KB).
-    Request {
-        idx:    u32,
-        begin:  u32,
-        length: u32,
-    },
+    // of the start of the block within the piece, ank the length of tle block (usually 16KB).
+    Request(BlockInfo),
 
-    // Clients send blocks in the piece message, referencing piece index and block offset.
+    // Clients senk blocks in tle piece message, referencing piece index and block offset.
     Piece {
         idx:    u32,
         begin:  u32,
@@ -49,11 +45,7 @@ pub enum Message {
     },
 
     // The cancel message is sent to cancel a request for a block.
-    Cancel {
-        idx:    u32,
-        begin:  u32,
-        length: u32,
-    },
+    Cancel(BlockInfo),
 
     // The port message is sent to inform the peer of the port number that the client is listening on.
     Port {
@@ -105,12 +97,12 @@ impl Encoder<Message> for MessageCodec {
                 dst.extend_from_slice(&bitfield.as_raw_slice());
             },
             // request: <len=0013><id=6><index><begin><length>
-            Message::Request { idx, begin, length } => {
+            Message::Request(block) => {
                 dst.put_u32(13);
                 dst.put_u8(6);
-                dst.put_u32(idx);
-                dst.put_u32(begin);
-                dst.put_u32(length);
+                dst.put_u32(block.piece_idx as u32);
+                dst.put_u32(block.offset as u32);
+                dst.put_u32(block.len);
             },
             // piece: <len=0009+X><id=7><index><begin><block>
             Message::Piece { idx, begin, block } => {
@@ -121,12 +113,12 @@ impl Encoder<Message> for MessageCodec {
                 dst.extend_from_slice(&block);
             },
             // cancel: <len=0013><id=8><index><begin><length>
-            Message::Cancel { idx, begin, length } => {
+            Message::Cancel(block) => {
                 dst.put_u32(13);
                 dst.put_u8(8);
-                dst.put_u32(idx);
-                dst.put_u32(begin);
-                dst.put_u32(length);
+                dst.put_u32(block.piece_idx as u32);
+                dst.put_u32(block.offset as u32);
+                dst.put_u32(block.len);
             },
             // port: <len=0003><id=9><listen-port>
             Message::Port { port } => {
@@ -150,7 +142,7 @@ impl Decoder for MessageCodec {
         // If there are less than 4 bytes, we can't read the length of the message.
         if src.remaining() < 4 { return Ok(None); }
 
-        let mut peeker = Cursor::new(&src[..]);
+        let mut peeker = Cursor::new(&src);
         // Gets first 4 bytes, which is the length of the message.
         let len = peeker.get_u32() as usize;
         // Reset cursor position to 0.
@@ -160,7 +152,7 @@ impl Decoder for MessageCodec {
             src.advance(4);
             if len == 0 { return Ok(Some(Message::KeepAlive)); }
         } else {
-            tracing::warn!("not enough bytes to read message length.");
+            tracing::trace!("read buf {} bytes long, msg {} bytes long ", src.remaining(), len);
             return Ok(None);
         }
 
@@ -176,10 +168,11 @@ impl Decoder for MessageCodec {
                 src.copy_to_slice(&mut bitfield);
                 Message::Bitfield(Bitfield::from_vec(bitfield))
             },
-            6 => Message::Request {
-                idx:    src.get_u32(),
-                begin:  src.get_u32(),
-                length: src.get_u32(),
+            6 => {
+                let piece_idx = src.get_u32() as usize;
+                let offset = src.get_u32() as usize;
+                let len = src.get_u32();
+                Message::Request(BlockInfo { piece_idx, offset, len })
             },
             7 => {
                 let idx = src.get_u32();
@@ -188,10 +181,11 @@ impl Decoder for MessageCodec {
                 src.copy_to_slice(&mut block);
                 Message::Piece { idx, begin, block }
             },
-            8 => Message::Cancel {
-                idx:    src.get_u32(),
-                begin:  src.get_u32(),
-                length: src.get_u32(),
+            8 => {
+                let piece_idx = src.get_u32() as usize;
+                let offset = src.get_u32() as usize;
+                let len = src.get_u32();
+                Message::Cancel(BlockInfo { piece_idx, offset, len })
             },
             9 => Message::Port { port: src.get_u32() },
             _ => {
@@ -201,6 +195,36 @@ impl Decoder for MessageCodec {
         };
         
         Ok(Some(msg))
+    }
+}
+
+impl std::fmt::Display for Message {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Message::KeepAlive => write!(f, "keep alive"),
+            Message::Choke => write!(f, "choke"),
+            Message::Unchoke => write!(f, "unchoke"),
+            Message::Interested => write!(f, "interested"),
+            Message::NotInterested => write!(f, "not interested"),
+            Message::Have { idx } => write!(f, "have piece idx: {}", idx),
+            Message::Bitfield(bf) => write!(f, "bitfield with {} pieces", bf.count_ones()),
+            Message::Request(block) => write!(f, "request for block {{ piece idx: {}, offset {}, length: {} }}",
+                block.piece_idx, 
+                block.offset, 
+                block.len
+            ),
+            Message::Piece { 
+                idx, 
+                begin, 
+                block 
+            } => write!(f, "block data {{ piece idx: {}, offset: {}, length: {} }}", idx, begin, block.len()),
+            Message::Cancel(block) => write!(f, "cancel for block {{ piece idx: {}, offset: {}, length: {} }}", 
+                block.piece_idx, 
+                block.offset, 
+                block.len
+            ),
+            Message::Port { port } => write!(f, "port {}", port),
+        }
     }
 }
 
@@ -239,7 +263,7 @@ mod tests {
             Message::Interested,
             Message::NotInterested,
             Message::Have { idx: 0xb },
-            Message::Request { idx: 0xb, begin: 0x134000, length: 0x4000 },
+            Message::Request(BlockInfo { piece_idx: 0xb, offset: 0x134000, len: 0x4000 }),
             Message::Piece { idx: 0xb, begin: 0x134000, block: vec![0x1, 0x2, 0x3] },
         ];
         

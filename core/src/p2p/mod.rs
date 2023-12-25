@@ -33,6 +33,9 @@ pub enum PeerError {
 
     #[error("bitfield sent before handshake")]
     UnexpectedBitfield,
+
+    #[error("no message recieved")]
+    NoMessage,
 }
 
 impl<T> From<SendError<T>> for PeerError {

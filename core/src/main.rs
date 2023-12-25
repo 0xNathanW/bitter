@@ -6,9 +6,12 @@ const DEFAULT_CLIENT_ID: [u8; 20] = *b"-RS0133-73b3b0b0b0b0";
 
 #[tokio::main]
 async fn main() {
-    let sub = tracing_subscriber::fmt::fmt().finish();
+
+    let format = tracing_subscriber::fmt::format();
+    let sub = tracing_subscriber::fmt().event_format(format).finish();
+    
     tracing::subscriber::set_global_default(sub).unwrap();
-    let meta_info = MetaInfo::new(Path::new("./test_torrents/test_single.torrent")).unwrap();
+    let meta_info = MetaInfo::new(Path::new("../test_torrents/test_single.torrent")).unwrap();
     let config = TorrentConfig {
         client_id: DEFAULT_CLIENT_ID,
         listen_address: SocketAddr::new(std::net::Ipv4Addr::UNSPECIFIED.into(), DEFAULT_PORT),

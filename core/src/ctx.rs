@@ -1,6 +1,5 @@
-use std::sync::Arc;
-use tokio::sync::{mpsc::UnboundedSender, RwLock};
-use crate::{torrent::CommandToTorrent, piece_selector::PieceSelector};
+use tokio::sync::mpsc::UnboundedSender;
+use crate::{torrent::CommandToTorrent, picker::Picker};
 
 #[derive(Debug)]
 pub struct TorrentContext {
@@ -11,7 +10,7 @@ pub struct TorrentContext {
     // The client ID for this client.
     pub client_id:      [u8; 20],
 
-    pub piece_selector: Arc<RwLock<PieceSelector>>,
+    pub picker: Picker,
 
     // The number of pieces in this torrent.
     pub num_pieces:     usize,
