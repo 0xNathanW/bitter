@@ -11,7 +11,8 @@ use crate::{
     p2p::{session::PeerSession, peer::PeerHandle},
     tracker::{Tracker, Event, AnnounceParams, TrackerError},
     metainfo::MetaInfo, 
-    fs::File, picker::Picker, 
+    fs::File, 
+    picker::Picker, 
 };
 
 // More aggressively search for peers when num < MIN_PEERS_PER_TORRENT
@@ -35,7 +36,8 @@ pub type Result<T> = std::result::Result<T, TorrentError>;
 pub enum CommandToTorrent {
     // Sent by a peer when successfully connected.
     PeerConnected { address: SocketAddr, id: [u8; 20] },
-
+    // Send by a peer when received block.
+    Block { idx: usize, offset: usize, data: Vec<u8> },
 }
 
 #[derive(Debug)]
@@ -62,6 +64,9 @@ pub struct Torrent {
     // Files for the torrent.
     files: Vec<File>,
 
+    // Sender to disk task.
+    disk: Disk,
+    
     // Address to listen for incoming connections on.
     listen_address: SocketAddr,
 
@@ -111,6 +116,7 @@ impl Torrent {
             cmd_rx,
             start_time: None,
             files: metainfo.files(),
+            disk: Disk::new(cmd_tx.clone()),
             listen_address: config.listen_address,
         }
     }
@@ -194,13 +200,17 @@ impl Torrent {
 
             Some(cmd) = self.cmd_rx.recv() => {
                 match cmd {
-                    CommandToTorrent::PeerConnected { address, id } => {
 
+                    CommandToTorrent::PeerConnected { address, id } => {
                         if let Some(peer) = self.peers.get_mut(&address) {
                             tracing::info!("peer {} connected", address);
                             peer.id = Some(id);
                         }
-                    }
+                    },
+
+                    CommandToTorrent::Block { idx, offset, data } => {
+                          
+                    },
                 }
             }
         }}

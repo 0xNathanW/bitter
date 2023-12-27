@@ -1,4 +1,4 @@
-use std::{fmt::Debug, sync::Arc, net::SocketAddr, collections::HashSet};
+use std::{fmt::Debug, sync::Arc, net::SocketAddr, collections::HashSet, alloc::handle_alloc_error};
 use tokio::{sync::mpsc::{UnboundedReceiver, UnboundedSender}, net::TcpStream};
 use tokio_util::codec::Framed;
 use futures::{SinkExt, StreamExt, stream::{SplitSink, SplitStream}};
@@ -251,7 +251,9 @@ impl PeerSession {
                     self.state.peer_interested = false;
                 }
             },
-            Message::Piece { idx, begin, block } => {},
+            Message::Piece { idx, begin, block } => {
+                self.handle_block(idx, begin, block).await?;
+            },
             Message::Request(block) => {},
             Message::Have { idx } => {},
             Message::Port { port } => {},
@@ -271,7 +273,7 @@ impl PeerSession {
             piece_idx,
             offset,
             len: block.len() as u32,
-        }
+        };
         self.block_requests_out.remove(&block);
 
         Ok(())    
