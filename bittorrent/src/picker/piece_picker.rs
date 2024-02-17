@@ -11,7 +11,9 @@ piece would be counter productive
 
 #[derive(Clone, Copy, Default, Debug)]
 struct PieceInfo {
+    // Number of peers that have this piece.
     frequency: usize,
+    // Is the piece partially downloaded.
     is_partial: bool,
 }
 
@@ -38,32 +40,34 @@ impl PiecePicker {
         &self.have
     }
 
-    pub fn increment_piece(&mut self, piece_idx: usize) -> bool {
-        debug_assert!(piece_idx < self.pieces.len());
-        self.pieces[piece_idx].frequency += 1;
-        self.have[piece_idx]
+    pub fn increment_piece(&mut self, idx: usize) -> bool {
+        assert!(idx < self.pieces.len());
+        self.pieces[idx].frequency += 1;
+        self.have[idx]
     }
 
     pub fn received_piece(&mut self, idx: usize) {
+        assert!(idx < self.pieces.len());
         self.have.set(idx, true);
     }
 
     pub fn bitfield_update(&mut self, bf: &Bitfield) -> bool {
-        debug_assert_eq!(bf.len(), self.have.len());
+        assert_eq!(bf.len(), self.have.len());
         let mut interested = false;
         bf.iter().enumerate().for_each(|(i, b)| {
             if *b { 
                 self.pieces[i].frequency += 1;
-            }
-            if !self.have[i] {
-                interested = true;
+                if !self.have[i] {
+                    interested = true;
+                }
             }
         });
         interested
     }
 
-    pub fn pick_piece(&mut self) -> Option<usize> {
-        for idx in 0..self.have.len() {
+    pub fn pick_new_piece(&mut self) -> Option<usize> {
+        //TODO: Picking in reverse to test out multi file torrents.
+        for idx in (0..self.have.len()).rev() {
             let piece = &mut self.pieces[idx];
             if !self.have[idx] && piece.frequency > 0 && !piece.is_partial {
                 piece.is_partial = true;

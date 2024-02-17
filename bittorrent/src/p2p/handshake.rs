@@ -1,5 +1,4 @@
-use std::{io::Cursor, fmt::Debug};
-use bytes::{BufMut, Buf};
+use bytes::{BufMut, Buf, BytesMut};
 use tokio_util::codec::{Encoder, Decoder};
 use super::PeerError;
 
@@ -13,12 +12,12 @@ pub struct Handshake {
 }
 
 impl Handshake {
-    pub fn new(info_hash: [u8; 20]) -> Self {
+    pub fn new(info_hash: [u8; 20], peer_id: [u8; 20]) -> Self {
         Self {
             protocol:   PROTOCOL,
-            reserved:   [0; 8],
+            reserved:   [0; 8], // TODO: Check there aren't any different situations for this.
             info_hash,
-            peer_id:    *b"-RS0133-73b3b0b0b0b0",
+            peer_id,
         }
     }
 }
@@ -29,12 +28,13 @@ impl Encoder<Handshake> for HandshakeCodec {
 
     type Error = PeerError;
 
-    fn encode(&mut self, item: Handshake, dst: &mut bytes::BytesMut) -> Result<(), Self::Error> {
+    fn encode(&mut self, item: Handshake, dst: &mut BytesMut) -> Result<(), Self::Error> {
         dst.put_u8(19);
         dst.extend_from_slice(&item.protocol);
         dst.extend_from_slice(&item.reserved);
         dst.extend_from_slice(&item.info_hash);
         dst.extend_from_slice(&item.peer_id);
+        debug_assert_eq!(dst.len(), 68, "encoded handshake length is not 68 bytes");
         Ok(())
     }
 }
@@ -44,37 +44,35 @@ impl Decoder for HandshakeCodec {
     type Item = Handshake;
     type Error = PeerError;
 
-    fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         
         if src.is_empty() {
             return Ok(None);
         }
 
-        let mut peeker = Cursor::new(&src[..]);
-        let prt_len = peeker.get_u8();
-        if prt_len != 19 {
+        let mut peeker = std::io::Cursor::new(&src[..]);
+        let protocol_len = peeker.get_u8();
+        if protocol_len != 19 {
             return Err(PeerError::IncorrectProtocol);
         }
 
-        if src.remaining() != 67 {
+        // TODO: is this correct?
+        if src.remaining() > 67 {
             src.advance(1);
         } else {
+            // Handshake not fully recieved.
             return Ok(None)
         }
         
-        // Protocol
         let mut protocol = [0; 19];
         src.copy_to_slice(&mut protocol);
 
-        // Reserved
         let mut reserved = [0; 8];
         src.copy_to_slice(&mut reserved);
 
-        // Info hash
         let mut info_hash = [0; 20];
         src.copy_to_slice(&mut info_hash);
 
-        // Peer id
         let mut peer_id = [0; 20];
         src.copy_to_slice(&mut peer_id);
 
@@ -87,12 +85,13 @@ impl Decoder for HandshakeCodec {
     }
 }
 
-impl Debug for Handshake {
+
+impl std::fmt::Debug for Handshake {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Handshake")
             .field("protocol", &String::from_utf8_lossy(&self.protocol))
             .field("reserved", &self.reserved)
-            .field("info_hash", &String::from_utf8_lossy(&self.info_hash))
+            .field("info_hash", &hex::encode(&self.info_hash))
             .field("peer_id", &String::from_utf8_lossy(&self.peer_id))
             .finish()
     }
@@ -104,7 +103,7 @@ mod tests {
 
     #[test]
     fn test_handshake_decoding() {
-        let mut src = bytes::BytesMut::new();
+        let mut src = BytesMut::new();
         src.put_u8(19);
         src.extend_from_slice(b"BitTorrent protocol");
         src.extend_from_slice(&[0; 8]);
@@ -120,10 +119,20 @@ mod tests {
     }
 
     #[test]
-    fn test_protocol_error() {
-        let mut src = bytes::BytesMut::new();
-        src.put_u8(18);
-        src.extend_from_slice(b"BitTorrent protocol wrong");
+    fn test_handshake_decoding_with_incomplete_data() {
+        let mut src = BytesMut::new();
+        src.put_u8(19);
+        src.extend_from_slice(b"BitTorrent protocol");
+        let mut decoder = HandshakeCodec;
+        let handshake = decoder.decode(&mut src);
+        assert!(handshake.unwrap().is_none());
+    }
+
+    #[test]
+    fn test_handshake_decoding_with_invalid_protocol_len() {
+        let mut src = BytesMut::new();
+        src.put_u8(20);
+        src.extend_from_slice(b"Invalid protocol");
         src.extend_from_slice(&[0; 8]);
         src.extend_from_slice(&[0; 20]);
         src.extend_from_slice(&[0; 20]);
@@ -131,5 +140,20 @@ mod tests {
         let mut decoder = HandshakeCodec;
         let handshake = decoder.decode(&mut src);
         assert!(handshake.is_err());
+    }
+
+    #[test]
+    fn test_handshake_decoding_with_extra_data() {
+        let mut src = BytesMut::new();
+        src.put_u8(19);
+        src.extend_from_slice(b"BitTorrent protocol");
+        src.extend_from_slice(&[0; 8]);
+        src.extend_from_slice(&[0; 20]);
+        src.extend_from_slice(&[0; 20]);
+        src.extend_from_slice(&[0; 10]); // Extra data
+
+        let mut decoder = HandshakeCodec;
+        let handshake = decoder.decode(&mut src);
+        assert!(handshake.unwrap().is_some());
     }
 }

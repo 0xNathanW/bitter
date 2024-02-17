@@ -1,8 +1,9 @@
 use serde::de;
-use crate::error::Result;
+use crate::Result;
 
 mod decoder;
 mod access;
+
 #[cfg(test)]
 mod test;
 

@@ -1,12 +1,10 @@
-use crate::error::{Error, Result};
+use crate::{Error, Result};
 use serde::de;
 use serde::ser;
-use std::fmt;
-use std::str;
 
 struct Expected;
 impl de::Expected for Expected {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(formatter, "a string or bytes")
     }
 }
@@ -19,7 +17,6 @@ fn unexpected<T>(unexp: de::Unexpected) -> Result<T> {
 /// StringSerializer for serializing *just* strings (bytes are also strings in bencode).
 /// The string is returned as Result<Vec<u8>>::Ok without any prefixing (without bencode string
 /// length prefix).
-// TODO: This should be pub(crate).
 pub struct StringSerializer;
 
 impl<'a> ser::Serializer for &'a mut StringSerializer {

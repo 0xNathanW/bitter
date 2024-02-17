@@ -1,7 +1,5 @@
 use serde::ser;
-use serde::ser::{Serializer, SerializeSeq};
-
-use crate::error::{Error, Result};
+use crate::{Error, Result};
 use super::map::SerializeMap;
 
 #[derive(Default)]
@@ -23,7 +21,7 @@ impl AsRef<[u8]> for Encoder {
     fn as_ref(&self) -> &[u8] { &self.0 }
 }
 
-impl<'a> Serializer for &'a mut Encoder {
+impl<'a> ser::Serializer for &'a mut Encoder {
 
     type Ok     = ();
     type Error  = Error;
@@ -229,7 +227,7 @@ impl<'a> Serializer for &'a mut Encoder {
     }
 }
 
-impl SerializeSeq for &mut Encoder {
+impl ser::SerializeSeq for &mut Encoder {
 
     type Ok = ();
     type Error = Error;

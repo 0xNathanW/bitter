@@ -1,8 +1,5 @@
 use std::collections::HashMap;
-use serde::{Serialize, Deserialize};
-use serde::ser::{SerializeSeq, SerializeMap};
-use serde::de;
-use serde_bytes::ByteBuf;
+use serde::{de, ser::{SerializeSeq, SerializeMap}};
 
 // Bencode types.
 #[derive(Debug, PartialEq, Eq)]
@@ -13,7 +10,7 @@ pub enum Token {
     Dictionary(HashMap<Vec<u8>, Token>)
 }
 
-impl Serialize for Token {
+impl serde::Serialize for Token {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
         where S: serde::Serializer 
     {
@@ -41,7 +38,7 @@ impl Serialize for Token {
     }
 }
 
-impl<'de> Deserialize<'de> for Token {
+impl<'de> serde::Deserialize<'de> for Token {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
         where D: serde::Deserializer<'de> 
     {
@@ -109,7 +106,7 @@ impl<'de> de::Visitor<'de> for TokenVisitor {
         where A: de::MapAccess<'de> 
     {
         let mut hmap = HashMap::new();
-        while let Some((k, v)) = access.next_entry::<ByteBuf, _>()? {
+        while let Some((k, v)) = access.next_entry::<serde_bytes::ByteBuf, _>()? {
             hmap.insert(k.into_vec(), v);
         }
         Ok(Token::Dictionary(hmap))

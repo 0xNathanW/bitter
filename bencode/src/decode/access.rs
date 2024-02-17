@@ -1,9 +1,7 @@
 use std::io::Read;
-use serde::{Deserializer, de};
-
-use crate::error::{Error, Result};
-use super::decoder::Decoder;
-use super::DecodedType;
+use serde::de;
+use crate::{Error, Result};
+use super::{decoder::Decoder, DecodedType};
 
 pub struct Access<'a, R: 'a + Read> {
     d:      &'a mut Decoder<R>,
@@ -98,7 +96,7 @@ impl<'de, 'a, R: Read> de::VariantAccess<'de> for Access<'a, R> {
         ) -> Result<V::Value>
         where V: de::Visitor<'de> 
     {
-        let out = Deserializer::deserialize_any(&mut *self.d, visitor)?;
+        let out = serde::Deserializer::deserialize_any(&mut *self.d, visitor)?;
         match self.d.read_next()? {
             DecodedType::EOF => Ok(out),
             e => Err(Error::InvalidToken{ expected: "e for end".to_string(), found: format!("{:?}", e) }),

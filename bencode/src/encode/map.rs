@@ -1,9 +1,6 @@
-use std::mem;
 use serde::ser;
-
-use super::string::StringSerializer;
-use super::encoder::Encoder;
-use crate::error::Error;
+use crate::Error;
+use super::{string::StringSerializer, encoder::Encoder};
 
 // A dictionary is encoded as d<contents>e. The elements of the dictionary are encoded with each key immediately 
 // followed by its value. All keys must be byte strings and must appear in lexicographical order. A dictionary that associates 
@@ -32,7 +29,7 @@ impl<'a> SerializeMap<'a> {
             )
         }
         // Take items and sort lexicographically.
-        let mut items = mem::take(&mut self.items);
+        let mut items = std::mem::take(&mut self.items);
         items.sort_by(| &(ref k, _), &(ref v, _) | { k.cmp(v) });
 
         self.serializer.push("d");

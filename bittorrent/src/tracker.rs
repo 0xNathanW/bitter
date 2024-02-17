@@ -59,7 +59,7 @@ impl Tracker {
     // Sends announce to tracker.
     #[tracing::instrument(skip(params, self), fields(url = %self.url))]
     pub async fn send_announce(&mut self, params: AnnounceParams) -> Result<Vec<SocketAddr>> {
-        tracing::debug!("announce params: {:#?}", params);
+        tracing::debug!("announce params: {:?}", params);
 
         let mut url = format!(
             "{}?info_hash={}&peer_id={}&port={}&uploaded={}&downloaded={}&left={}&compact=1",
@@ -88,7 +88,7 @@ impl Tracker {
             .bytes()
             .await?;
         let resp: TrackerResponse = bencode::decode_bytes(&raw_resp)?;
-        tracing::debug!("announce response: {:#?}", resp);
+        tracing::debug!("announce response: {:?}", resp);
         
         if let Some(failure) = resp.failure_reason {
             tracing::warn!("failure: {}", failure);
@@ -302,14 +302,11 @@ mod tests {
     #[test]
     fn test_parse_response_binary() {
         let s = "64383a636f6d706c65746569396531303a696e636f6d706c657465693165383a696e74657276616c69313830306531323a6d696e20696e74657276616c693138303065353a706565727336303a52454d051ae1ca2f2a2ec00884937726decc61759ab8138851ab05e8f6bb5062f69770469247493ad4d005879f2ec8d54237ce44ea6043db8806c8d565";
-        let raw = hex::decode(s).unwrap();
-
-        let response: TrackerResponse = bencode::decode_bytes(&raw).unwrap();        
+        let response: TrackerResponse = bencode::decode_bytes(&hex::decode(s).unwrap()).unwrap();        
         assert_eq!(response.interval, Some(1800));
         assert_eq!(response.min_interval, Some(1800));
         assert_eq!(response.complete, Some(9));
         assert_eq!(response.incomplete, Some(1));
-
         assert!(response.peers.contains(&SocketAddr::new(IpAddr::V4(Ipv4Addr::new(97, 117, 154, 184)), 5000)));
         assert!(response.peers.contains(&SocketAddr::new(IpAddr::V4(Ipv4Addr::new(5, 135, 159, 46)), 51413)));
     }

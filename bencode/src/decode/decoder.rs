@@ -1,12 +1,7 @@
-use std::{io::Read, vec};
-use serde::{
-    de, 
-    forward_to_deserialize_any,
-    de::Deserializer,
-};
-use crate::error::{Error, Result};
-use super::DecodedType;
-use super::access::Access;
+use std::io::Read;
+use serde::de;
+use crate::{Error, Result};
+use super::{DecodedType, access::Access};
 
 pub struct Decoder<R: Read> {
     pub scanner:    R,
@@ -106,7 +101,7 @@ impl<'de, R: Read> Decoder<R> {
     }
 }
 
-impl<'de, 'a, R: Read> Deserializer<'de> for &'a mut Decoder<R> {
+impl<'de, 'a, R: Read> de::Deserializer<'de> for &'a mut Decoder<R> {
 
     type Error = Error;
 
@@ -122,7 +117,7 @@ impl<'de, 'a, R: Read> Deserializer<'de> for &'a mut Decoder<R> {
         }
     }
 
-    forward_to_deserialize_any! {
+    serde::forward_to_deserialize_any! {
         bool char
         i8 i16 i32 i64
         u8 u16 u32 u64

@@ -1,10 +1,10 @@
 use serde::ser;
-
-use crate::error::{Error, Result};
+use crate::{Error, Result};
 
 mod encoder;
 mod map;
 mod string;
+
 #[cfg(test)]
 mod test;
 
