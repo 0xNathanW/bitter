@@ -34,7 +34,7 @@ pub enum Message {
     Request(block::BlockInfo),
 
     // Clients senk blocks in tle piece message, referencing piece index and block offset.
-    Block(block::BlockData),
+    Block(block::Block),
 
     // The cancel message is sent to cancel a request for a block.
     Cancel(block::BlockInfo),
@@ -108,7 +108,7 @@ impl Encoder<Message> for MessageCodec {
                 dst.put_u8(7);
                 dst.put_u32(block.piece_idx as u32);
                 dst.put_u32(block.offset as u32);
-                dst.extend_from_slice(&block.data);
+                dst.extend_from_slice(&block.data.into_owned());
             },
 
             // cancel: <len=0013><id=8><index><begin><length>
@@ -176,7 +176,7 @@ impl Decoder for MessageCodec {
                 let offset = src.get_u32() as usize;
                 let mut data = vec![0; msg_len - 9];
                 src.copy_to_slice(&mut data);
-                Message::Block(block::BlockData { piece_idx, offset, data })
+                Message::Block(block::Block { piece_idx, offset, data: block::BlockData::Owned(data) })
             },
             8 => {
                 let piece_idx = src.get_u32() as usize;
@@ -264,7 +264,7 @@ mod tests {
             Message::Have { idx: 0xb },
             Message::Bitfield(BitVec::<u8, Msb0>::from_slice(&[0x1, 0x2, 0x3])),
             Message::Request(block::BlockInfo { piece_idx: 0xb, offset: 0x134000, len: 0x4000 }),
-            Message::Block(block::BlockData { piece_idx: 0xb, offset: 0x134000, data: vec![0x1, 0x2, 0x3] }),
+            Message::Block(block::Block { piece_idx: 0xb, offset: 0x134000, data: block::BlockData::Owned(vec![0x1, 0x2, 0x3]) }),
         ];
         let expected_buf = buf.clone();        
         
@@ -298,7 +298,7 @@ mod tests {
         // Add other 1/2
         buf.extend_from_slice(&[0x2, 0x3]);
         let decoded = MessageCodec.decode(&mut buf).unwrap().unwrap();
-        assert_eq!(decoded, Message::Block(block::BlockData { piece_idx: 0xb, offset: 0x134000, data: vec![0x1, 0x2, 0x3] }));
+        assert_eq!(decoded, Message::Block(block::Block { piece_idx: 0xb, offset: 0x134000, data: block::BlockData::Owned(vec![0x1, 0x2, 0x3]) }));
     }
 
     #[test]

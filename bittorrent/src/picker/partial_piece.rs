@@ -13,13 +13,13 @@ pub enum BlockState {
 pub struct PartialPiece {
 
     // Piece index.
-    idx: usize,
+    pub idx: usize,
     
     // Length of piece.
-    len: usize,
+    pub len: usize,
     
     // State of all blocks within this piece.
-    blocks_states: Vec<BlockState>
+    pub blocks_states: Vec<BlockState>
 
 }
 

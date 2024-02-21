@@ -2,19 +2,11 @@ use std::{collections::HashSet, net::SocketAddr, sync::Arc};
 use tokio::{sync::mpsc, net::TcpStream, time};
 use tokio_util::codec::Framed;
 use futures::{SinkExt, StreamExt, stream::SplitSink};
-use crate::{block, torrent, Bitfield};
-use super::{
-    Result,
-    PeerError,
-    handshake::*, 
-    message::*, 
-    PeerCommand, 
-    state::{ConnState, SessionState},
-};
+use crate::{block, torrent, Bitfield, fs, picker::partial_piece::BlockState};
+use super::{*, message::*, handshake::*, state::*};
 
 const TARGET_REQUEST_Q_LEN: usize = 4;
 
-// Type alises.
 type MessageSink = SplitSink<Framed<TcpStream, MessageCodec>, Message>;
 
 #[derive(Debug)]
@@ -28,6 +20,7 @@ pub enum PeerState {
 #[derive(Debug)]
 pub struct PeerSession {
 
+    // The peer's IP address.
     address: SocketAddr,
     
     // The peer's ID will be set after the handshake.
@@ -37,10 +30,10 @@ pub struct PeerSession {
     torrent_ctx: Arc<torrent::TorrentContext>,
     
     // Commands to the peer.
-    peer_rx: mpsc::UnboundedReceiver<PeerCommand>,
+    peer_rx: PeerRx,
     
     // Internal send channel for disk reads.
-    peer_tx: mpsc::UnboundedSender<PeerCommand>,
+    peer_tx: PeerTx,
 
     // Bitfield of pieces the peer currently has.
     bitfield: Bitfield,
@@ -57,15 +50,11 @@ pub struct PeerSession {
 
 impl PeerSession {
 
-    pub fn new(
-        address: SocketAddr,
-        torrent_ctx: Arc<torrent::TorrentContext>,
-    ) -> (
-        PeerSession, 
-        mpsc::UnboundedSender<PeerCommand>
-    ) {
+    pub fn new(address: SocketAddr, torrent_ctx: Arc<torrent::TorrentContext>) -> (PeerSession, PeerTx) {
+
         let (peer_tx, peer_rx) = mpsc::unbounded_channel();
         let num_pieces = torrent_ctx.info.num_pieces as usize;
+        
         (
             PeerSession {
                 address,
@@ -196,6 +185,10 @@ impl PeerSession {
             Some(cmd) = self.peer_rx.recv() => {
                 match cmd {
 
+                    PeerCommand::BlockRead(block) => {
+                        tracing::info!("block read: {:?}", block);
+                    },
+
                     PeerCommand::PieceWritten(idx) => {
                         self.handle_written_piece(&mut sink, idx).await?;
                     },
@@ -238,7 +231,7 @@ impl PeerSession {
                 if self.state.conn_state == ConnState::Introducing {
                     self.handle_bitfield(sink, bitfiled).await?;
                 } else {
-                    tracing::warn!("unexpected bitfield");
+                    tracing::error!("unexpected bitfield");
                     return Err(PeerError::UnexpectedBitfield);
                 }
             },
@@ -260,6 +253,7 @@ impl PeerSession {
                 }
             },
             Message::Interested => {
+                // TODO: Only send unchoke reciprocally.
                 if !self.state.peer_interested {
                     self.state.peer_interested = true;
                     self.send_message(sink, Message::Unchoke).await?;
@@ -275,10 +269,12 @@ impl PeerSession {
                 self.handle_block(block).await?;
                 self.make_requests(sink).await?;
             },
-            Message::Request(_block) => {},
-            Message::Have { idx: _ } => {},
+            // TODO: do we need to stop whole task if request is invalid?
+            // Will need to match error.
+            Message::Request(block_info) => self.handle_request(block_info).await?,
+            Message::Have { idx } => self.handle_have(sink, idx).await?,
             Message::Port { port: _ } => {},
-            Message::Cancel(_block) => {},
+            Message::Cancel(block_info) => self.handle_cancel(block_info).await?,
         }
 
         if self.state.conn_state == ConnState::Introducing {
@@ -300,7 +296,6 @@ impl PeerSession {
 
     async fn handle_bitfield(&mut self, sink: &mut MessageSink, mut bitfield: Bitfield) -> Result<()> {
         tracing::info!("peer has {}/{} pieces", bitfield.count_ones(), self.torrent_ctx.info.num_pieces);
-        tracing::debug!("bitfield: {:?}", bitfield);
         // Remove trailing bits.
         bitfield.resize(self.torrent_ctx.info.num_pieces as usize, false);
         // Interested if peer has pieces we don't.
@@ -309,17 +304,46 @@ impl PeerSession {
         self.update_interest(sink, interested).await
     }
 
-    async fn handle_block(
-        &mut self,
-        block_data: block::BlockData,
-    ) -> Result<()> {
+    async fn handle_have(&mut self, sink: &mut MessageSink, idx: u32) -> Result<()> {
+    
+        if idx >= self.torrent_ctx.info.num_pieces {
+            tracing::warn!("have msg with invalid idx: {}", idx);
+            return Err(PeerError::InvalidMessage);
+        }
+        
+        if self.bitfield[idx as usize] {
+            return Ok(());
+        }
+        self.bitfield.set(idx as usize, true);
+
+        let interested = self
+            .torrent_ctx
+            .picker
+            .piece_picker
+            .write()
+            .await
+            .increment_piece(idx as usize);
+
+        self.update_interest(sink, interested).await
+    }
+
+    async fn handle_block(&mut self, block_data: block::Block) -> Result<()> {
+        
         let block_info = block::BlockInfo {
             piece_idx: block_data.piece_idx,
             offset: block_data.offset,
             len: block_data.data.len(),
         };
-        self.requests_out.remove(&block_info);
-        let block_prev_state = if let Some(partial_piece) = self
+
+        // Checks block validity and removes from requests_out.
+        if !self.requests_out.remove(&block_info) {
+            // TODO: penalise peer.
+            // TODO: add defence against random block spamming.
+            tracing::warn!("unexpected block: {:?}", &block_info);
+            return Ok(());
+        }
+        
+        let prev_block_state = if let Some(partial_piece) = self
             .torrent_ctx
             .picker
             .partial_pieces
@@ -327,21 +351,60 @@ impl PeerSession {
             .await
             .get(&block_info.piece_idx) 
         {
-            partial_piece.write().await.received_block(&block_info)    
+            partial_piece.write().await.received_block(&block_info)  
         } else {
+            // This should'nt be possible.
+            // Maybe it would in end game mode, if piece completed and already written.
+            // Block is being checked for in requests_out, so it should be in partial_pieces.
+            tracing::warn!("received block for non-existent piece: {:?}", &block_info);
             return Ok(());
         };
 
-        if block_prev_state != crate::picker::partial_piece::BlockState::Received {
+        if prev_block_state != BlockState::Received {
             self.torrent_ctx.disk_tx
-                .send(crate::fs::CommandToDisk::WriteBlock { block: block_info, data: block_data.data })
+                .send(fs::CommandToDisk::WriteBlock { block: block_info, data: block_data.data.into_owned() })
                 .map_err(|e| e.into())
         } else {
+            // Again, do we need to check for spamming?
+            // Should allow when in end game mode.
             tracing::warn!("duplicate block: {:?}", &block_info);
             Ok(())
         }
     }
     
+    async fn handle_request(&mut self, block_info: block::BlockInfo) -> Result<()> {
+        
+        if self.state.choked {
+            tracing::warn!("sending requests whilst choked");
+            return Err(PeerError::InvalidMessage);
+        }
+        if !block_info.is_valid(&self.torrent_ctx.info) {
+            tracing::warn!("invalid request: {:?}", block_info);
+            return Err(PeerError::InvalidMessage);
+        }
+        if self.requests_out.contains(&block_info) {
+            tracing::warn!("duplicate request: {:?}", block_info);
+            return Ok(());
+        }
+
+        self.requests_out.insert(block_info);
+        self.torrent_ctx.disk_tx.send(fs::CommandToDisk::ReadBlock {
+            block: block_info,
+            tx: self.peer_tx.clone(),
+        })?;
+
+        Ok(())
+    }
+
+    async fn handle_cancel(&mut self, block_info: block::BlockInfo) -> Result<()> {
+        if !block_info.is_valid(&self.torrent_ctx.info) {
+            tracing::warn!("invalid cancel: {:?}", block_info);
+            return Err(PeerError::InvalidMessage);
+        }
+        self.requests_out.remove(&block_info);
+        Ok(())
+    }
+
     async fn handle_written_piece(
         &mut self,
         sink: &mut SplitSink<Framed<TcpStream, MessageCodec>, Message>,
@@ -371,7 +434,7 @@ impl PeerSession {
         
         let requests = self
             .torrent_ctx.picker
-            .pick_blocks(&self.requests_out, 20)
+            .pick_blocks(&self.requests_out, 20, &self.bitfield)
             .await;
         
         // TODO: test whether quicker sending batch if requets.len() > 1.
@@ -395,13 +458,17 @@ impl PeerSession {
         Ok(())
     }
 
+    async fn send_block(&mut self, sink: &mut MessageSink, block: block::BlockData) -> Result<()> {
+        Ok(())
+    }
+
     async fn free_requests_out(&mut self) {
         tracing::info!("freeing requested blocks");
         let partial_pieces = self.torrent_ctx.picker.partial_pieces.read().await;
         for block in self.requests_out.drain() {
             if let Some(partial_piece) = partial_pieces.get(&block.piece_idx) {
                 partial_piece.write().await.free_block(&block);
-                tracing::debug!("freed block: {:?}", block);
+                tracing::trace!("freed block: {:?}", block);
             }
         }
     }

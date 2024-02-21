@@ -4,14 +4,14 @@ use std::{
     time::Instant,
     sync::Arc,
 };
-use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc;
 use crate::{
     p2p::{PeerHandle, PeerSession, PeerCommand},
     tracker::{Tracker, Event, AnnounceParams, TrackerError},
     metainfo::MetaInfo, 
     picker::Picker,
     store::StoreInfo, 
-    fs::{CommandToDisk, spawn}, 
+    fs, 
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -23,17 +23,20 @@ pub enum TorrentError {
     #[error("io error: {0}")]
     IoError(#[from] std::io::Error),
 
-    #[error("torrent channel error")]
-    Channel,
+    #[error("channel error: {0}")]
+    Channel(String),
 }
 
 impl<T> From<mpsc::error::SendError<T>> for TorrentError {
-    fn from(_: mpsc::error::SendError<T>) -> Self {
-        TorrentError::Channel        
+    fn from(e: mpsc::error::SendError<T>) -> Self {
+        TorrentError::Channel(e.to_string())       
     }
 }
 
+// Type aliases.
 pub type Result<T> = std::result::Result<T, TorrentError>;
+pub type TorrentTx = mpsc::UnboundedSender<CommandToTorrent>;
+pub type TorrentRx = mpsc::UnboundedReceiver<CommandToTorrent>;
 
 // Commands that can be sent to a torrent from other tasks.
 pub enum CommandToTorrent {
@@ -65,10 +68,10 @@ pub struct Torrent {
     available: Vec<SocketAddr>,
 
     // Receiver for commands.
-    torrent_rx: UnboundedReceiver<CommandToTorrent>,
+    torrent_rx: TorrentRx,
 
     // Sender for commands, used on shutdown.
-    torrent_tx: UnboundedSender<CommandToTorrent>,
+    torrent_tx: TorrentTx,
 
     // Time when torrent started.
     start_time: Option<Instant>,
@@ -78,7 +81,7 @@ pub struct Torrent {
 
     // Handle for disk task.
     // Option is for moving out of the handle behind a mutable ref.
-    disk_handle: Option<tokio::task::JoinHandle<crate::fs::Result<()>>>,
+    disk_handle: Option<tokio::task::JoinHandle<fs::Result<()>>>,
 
     // Minimum and maximum peers desired for the torrent.
     min_max_peers: (u32, u32),
@@ -98,10 +101,10 @@ pub struct TorrentContext {
     pub picker: Picker,
 
     // Commands to the peer.
-    pub torrent_tx: UnboundedSender<CommandToTorrent>,
+    pub torrent_tx: TorrentTx,
     
     // // Commands to disk.
-    pub disk_tx: UnboundedSender<CommandToDisk>,
+    pub disk_tx: fs::DiskTx,
 
     // Torrent storage information.
     pub info: StoreInfo,
@@ -132,7 +135,7 @@ impl Torrent {
         let info = StoreInfo::new(&metainfo, config.output_dir);
         let (torrent_tx, torrent_rx) = mpsc::unbounded_channel();
         // Change unwrap after moving disk outside of torrent.
-        let (disk_handle, disk_tx) = spawn(info.clone(), metainfo.piece_hashes(), torrent_tx.clone()).await.unwrap();
+        let (disk_handle, disk_tx) = fs::spawn(info.clone(), metainfo.piece_hashes(), torrent_tx.clone()).await.unwrap();
         
         Torrent {
             ctx: Arc::new(
@@ -315,7 +318,7 @@ impl Torrent {
                 tracing::warn!("session shutdown: {}", e);
             }
         }
-        self.ctx.disk_tx.send(CommandToDisk::Shutdown)?;
+        self.ctx.disk_tx.send(fs::CommandToDisk::Shutdown)?;
         self
             .disk_handle
             .take()

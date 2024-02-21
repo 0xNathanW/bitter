@@ -354,6 +354,6 @@ mod tests {
         let metainfo = MetaInfo::new("tests/test_torrents/test_multi.torrent").unwrap();
         // Pretty debug print.
         println!("{:#?}", metainfo);
-        println!("{:?}", metainfo.info_hash_hex());
+        println!("{}", metainfo.total_len());
     }
 }

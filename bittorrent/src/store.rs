@@ -28,11 +28,7 @@ pub struct FileInfo {
 impl FileInfo {
     // Byte index range for whole torrent.
     pub fn byte_range(&self) -> Range<usize> {
-        self.offset..(self.offset + self.length + 1)
-    }
-
-    pub fn last_byte(&self) -> usize {
-        self.offset + self.length
+        self.offset..(self.offset + self.length)
     }
 }
 
@@ -86,7 +82,7 @@ impl StoreInfo {
     }
 
     // Returns length of piece given its index.
-    pub fn piece_length(&self, idx: usize) -> usize {
+    pub fn piece_len(&self, idx: usize) -> usize {
         if idx as u32 == self.num_pieces - 1 {
             self.last_piece_len
         } else {
@@ -94,7 +90,8 @@ impl StoreInfo {
         }
     }
 
-    pub fn piece_byte_offset(&self, piece_idx: usize) -> usize {
+    // Returns the total bytes offset within the torrent of a piece.
+    pub fn piece_total_offset(&self, piece_idx: usize) -> usize {
         piece_idx * self.piece_len
     }
 
@@ -108,7 +105,7 @@ impl StoreInfo {
         }
 
         let offset = piece_idx * self.piece_len;
-        let end = offset + self.piece_length(piece_idx);
+        let end = offset + self.piece_len(piece_idx) - 1;
 
         let start_file = match self.files
             .iter()
@@ -138,10 +135,26 @@ mod tests {
 
     #[test]
     fn test_piece_file_intersections() {
-        let metainfo = MetaInfo::new(std::path::Path::new("tests/test_torrents/test_multi.torrent")).unwrap();
+        let path = std::path::Path::new("tests/test_torrents/test_multi.torrent");
+        let metainfo = MetaInfo::new(path).unwrap();
         let store_info = StoreInfo::new(&metainfo, std::path::PathBuf::from("freedom"));
-        let intersections = store_info.piece_file_intersections(0);
-        println!("{:?}", intersections);
+        println!("{}", store_info.last_piece_len);
+        for idx in 0..=8302 {
+            assert_eq!(store_info.piece_file_intersections(idx), 0..1);
+        }
+        assert_eq!(store_info.piece_file_intersections(8303), 0..2);
+        for idx in 8304..=11072 {
+            assert_eq!(store_info.piece_file_intersections(idx), 1..2);
+        }
+        assert_eq!(store_info.piece_file_intersections(11073), 1..8);
     }
 
+    #[test]
+    fn test_piece_offset() {
+        let metainfo = MetaInfo::new(std::path::Path::new("tests/test_torrents/test_multi.torrent")).unwrap();
+        let store_info = StoreInfo::new(&metainfo, std::path::PathBuf::from("freedom"));
+        assert_eq!(store_info.piece_total_offset(0), 0);
+        assert_eq!(store_info.piece_total_offset(1), 524288);
+        assert_eq!(store_info.piece_total_offset(11073), 5_805_441_024);
+    }
 }

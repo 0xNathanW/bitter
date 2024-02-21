@@ -1,16 +1,8 @@
 # Notes
 
 IMMEDIATE TASK:
-    - working on piece_write
-    - test multifile.
-      - testing by picking pieces in reverse, because last files are smaller.
-      - failing on trackers.
-        - actually works now but i think **left** is still wrong.
-    - are we checking peers actually have the piece we are sending requests for?
-      - prevents duplicates
 
 TODO:
-    - Implement block reads!
     - Setup seeder/leecher tests.
     - Manager for multiple torrents at once.
       - Setup TorrentManager struct.

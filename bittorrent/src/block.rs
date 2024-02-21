@@ -1,7 +1,29 @@
-use crate::BLOCK_SIZE;
+use crate::{store::StoreInfo, BLOCK_SIZE};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BlockData {
+pub enum BlockData {
+    Owned(Vec<u8>),
+    Cached(std::sync::Arc<Vec<u8>>),
+}
+
+impl BlockData {
+    pub fn len(&self) -> usize {
+        match self {
+            BlockData::Owned(data) => data.len(),
+            BlockData::Cached(data) => data.len(),
+        }
+    }
+
+    pub fn into_owned(self) -> Vec<u8> {
+        match self {
+            BlockData::Owned(data) => data,
+            _ => panic!("cannot convert cached data to owned data"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Block {
     // Index of piece that the block is contained in.
     pub piece_idx: usize,
 
@@ -9,7 +31,7 @@ pub struct BlockData {
     pub offset: usize,
 
     // Data of block.
-    pub data: Vec<u8>,
+    pub data: BlockData,
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
@@ -23,10 +45,25 @@ pub struct BlockInfo {
 
 }
 
-impl BlockInfo {
-    #[inline]
+impl Block {
     pub fn idx_in_piece(&self) -> usize {
         self.offset / BLOCK_SIZE as usize
+    }
+}
+
+impl BlockInfo {
+    pub fn idx_in_piece(&self) -> usize {
+        self.offset / BLOCK_SIZE as usize
+    }
+
+    pub fn is_valid(&self, info: &StoreInfo) -> bool {
+        if self.piece_idx >= info.num_pieces as usize {
+            return false;
+        }
+        if self.offset + self.len > info.piece_len(self.piece_idx) {
+            return false;
+        }
+        true
     }
 }
 
@@ -63,4 +100,6 @@ mod tests {
         assert_eq!(num_blocks(BLOCK_SIZE * 5 + 1000), 6);
         assert_eq!(num_blocks(0), 0);
     }
+
+    // TODO: add tests for BlockInfo::is_valid
 }

@@ -65,11 +65,10 @@ impl PiecePicker {
         interested
     }
 
-    pub fn pick_new_piece(&mut self) -> Option<usize> {
-        //TODO: Picking in reverse to test out multi file torrents.
-        for idx in (0..self.have.len()).rev() {
+    pub fn pick_new_piece(&mut self, bf: &Bitfield) -> Option<usize> {
+        for idx in 0..self.have.len() {
             let piece = &mut self.pieces[idx];
-            if !self.have[idx] && piece.frequency > 0 && !piece.is_partial {
+            if !self.have[idx] && piece.frequency > 0 && !piece.is_partial && bf[idx] {
                 piece.is_partial = true;
                 return Some(idx)
             }
