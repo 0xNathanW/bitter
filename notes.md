@@ -1,19 +1,18 @@
 # Notes
 
 IMMEDIATE TASK:
-
+    - Implement seeding/continued downloading.
+      - Check output_dir location for files.
+        - Check hashes of already downloaded pieces. 
 TODO:
     - Setup seeder/leecher tests.
-    - Manager for multiple torrents at once.
-      - Setup TorrentManager struct.
-      - Move disk outside of torrent struct.
     - Actual algorithm for piece selection.
     - Designation of peers based on whether they are seeders.
     - Move tracker to a seperate thread/task.
     - Don't expose metainfo to external api.
     - Implement upd/wss trackers.
     - Request queuing, ie, waiting for buffer to fill before sending multiple requests in a batch.
-
+    - can i replace Option<Joinhandle> with just Joinhandle, see: https://github.com/ratatui-org/async-template/blob/main/ratatui-counter/src/tui.rs
 
 PICKER:
     - if can pick from partial pieces:
@@ -26,4 +25,7 @@ PICKER:
         - pick REQUESTED BLOCKS sequentially from partial pieces < target
           - ensure blocks not already in peer's own request queue 
 
+OUTLINE:
 
+disk:
+    - handles read/writes 

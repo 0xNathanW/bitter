@@ -1,12 +1,14 @@
 use std::{collections::HashMap, path::{Path, PathBuf}};
 use sha1::{Sha1, Digest};
+use tokio::sync::mpsc;
 use crate::{
-    block::*, 
-    fs::{spawn, CommandToDisk}, 
-    p2p::PeerCommand, 
-    store::StoreInfo, 
-    torrent::CommandToTorrent, 
-    MetaInfo, 
+    block::*,
+    client::CommandToClient,
+    fs::{spawn_disk, CommandToDisk},
+    p2p::PeerCommand,
+    store::StoreInfo,
+    torrent::CommandToTorrent,
+    MetaInfo,
     BLOCK_SIZE,
 };
 
@@ -21,13 +23,25 @@ const TEST_TORRENT_DIR_PATH: &str = "tests/test_data/";
 async fn test_disk_read() -> Result<(), Box<dyn std::error::Error>> {
 
     let metainfo = MetaInfo::new(Path::new(TEST_TORRENT_FILE_PATH))?;
+    let id = metainfo.info_hash();
     let info = StoreInfo::new(&metainfo, TEST_TORRENT_DIR_PATH.into());
-    let (torrent_tx, _) = tokio::sync::mpsc::unbounded_channel();
-    let (_h, disk_tx) = spawn(info.clone(), metainfo.piece_hashes(), torrent_tx).await?;
-    let (peer_tx, mut peer_rx) = tokio::sync::mpsc::unbounded_channel();
+    let (client_tx, mut client_rx) = mpsc::unbounded_channel();
+    let (torrent_tx, _) = mpsc::unbounded_channel();
+    let (_, disk_tx) = spawn_disk(client_tx)?;
+    disk_tx.send(CommandToDisk::NewTorrent {
+        id,
+        info: info.clone(),
+        piece_hashes: metainfo.piece_hashes(),
+        torrent_tx,
+    })?;
+    let (peer_tx, mut peer_rx) = mpsc::unbounded_channel();
+
+    match client_rx.recv().await.expect("didn't recieve ") {
+        CommandToClient::TorrentAllocation(Ok(_)) => {},
+        _ => panic!("unexpected client command"),
+    }
 
     for piece_idx in 0..metainfo.num_pieces() as usize {
-
         let num_blocks = num_blocks(info.piece_len(piece_idx)) as usize;
         for block_idx in 0..num_blocks {
             let block_info = BlockInfo {
@@ -35,7 +49,7 @@ async fn test_disk_read() -> Result<(), Box<dyn std::error::Error>> {
                 offset: block_idx * BLOCK_SIZE as usize,
                 len: block_len(info.piece_len(piece_idx), block_idx as usize),
             };
-            disk_tx.send(CommandToDisk::ReadBlock { block: block_info, tx: peer_tx.clone() })?;
+            disk_tx.send(CommandToDisk::ReadBlock { id, block: block_info, tx: peer_tx.clone() })?;
         }
 
         let mut piece_buf = vec![0; info.piece_len(piece_idx)];
@@ -44,7 +58,10 @@ async fn test_disk_read() -> Result<(), Box<dyn std::error::Error>> {
             match cmd {
                 PeerCommand::BlockRead(block) => {
                     match block.data {
-                        BlockData::Cached(data) => piece_buf[block.offset..block.offset + data.len()].copy_from_slice(&data),
+                        BlockData::Cached(data) => piece_buf[
+                            block.offset..
+                            block.offset + data.len()
+                        ].copy_from_slice(&data),
                         _ => panic!("unexpected block data"),
                     }
                     blocks_received += 1;
@@ -74,6 +91,7 @@ async fn test_disk_read() -> Result<(), Box<dyn std::error::Error>> {
 async fn test_disk_write() -> Result<(), Box<dyn std::error::Error>> {
 
     let metainfo = MetaInfo::new(Path::new(TEST_TORRENT_FILE_PATH))?;
+    let id = metainfo.info_hash();
     let mut file_lens = HashMap::new();
     for file in metainfo.files() {
         file_lens.insert(file.path.clone(), file.length);
@@ -93,18 +111,28 @@ async fn test_disk_write() -> Result<(), Box<dyn std::error::Error>> {
     let last_hash: [u8; 20] = hasher.finalize().into();
     piece_hashes[last_piece_idx] = last_hash;
 
-    let (torrent_tx, mut torrent_rx) = tokio::sync::mpsc::unbounded_channel();
-    let (_h, disk_tx) = spawn(info.clone(), piece_hashes, torrent_tx).await?;
+    let (torrent_tx, mut torrent_rx) = mpsc::unbounded_channel();
+    let (client_tx, mut client_rx) = mpsc::unbounded_channel();
+    let (_, disk_tx) = spawn_disk(client_tx)?;
+    disk_tx.send(CommandToDisk::NewTorrent {
+        id,
+        info,
+        piece_hashes,
+        torrent_tx,
+    })?;
+
+    match client_rx.recv().await.expect("didn't recieve ") {
+        CommandToClient::TorrentAllocation(Ok(_)) => {},
+        _ => panic!("unexpected client command"),
+    }
 
     for i in 0..num_blocks {
-        let block_len = block_len(last_piece_len, i);
-        let block = BlockInfo {
+        let block = Block {
             piece_idx: last_piece_idx,
             offset: i * BLOCK_SIZE as usize,
-            len: block_len,
+            data: BlockData::Owned(vec![1; block_len(last_piece_len, i)]),
         };
-        let data = vec![1; block_len];
-        disk_tx.send(CommandToDisk::WriteBlock { block, data })?;
+        disk_tx.send(CommandToDisk::WriteBlock { id, block })?;
     }
 
     let cmd = torrent_rx.recv().await;

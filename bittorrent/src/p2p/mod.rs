@@ -1,12 +1,14 @@
 use tokio::sync::mpsc;
-use crate::block::Block;
+use crate::{block::Block, stats::ThroughputStats};
 
 mod session;
-mod state;
 mod message;
 mod handshake;
+pub mod state;
 
 pub use session::PeerSession;
+
+use self::state::SessionState;
 
 type Result<T, E = PeerError> = std::result::Result<T, E>;
 pub type PeerTx = mpsc::UnboundedSender<PeerCommand>;
@@ -75,6 +77,8 @@ pub struct PeerHandle {
     // Sends commands to the torrent.
     pub peer_tx: Option<PeerTx>,
 
+    pub state: SessionState,
+
     // Handle to the peer session.
     pub session_handle: Option<tokio::task::JoinHandle<Result<()>>>,
     
@@ -87,6 +91,7 @@ impl PeerHandle {
             id: None,
             peer_tx: Some(peer_tx),
             session_handle: Some(handle),
+            state: SessionState::default(),
         }
     }
 

@@ -1,7 +1,7 @@
 [workspace]
-
 members = [
     "bencode",
     "bittorrent",
     "tui",
 ]
+resolver = "2"

@@ -90,11 +90,6 @@ impl StoreInfo {
         }
     }
 
-    // Returns the total bytes offset within the torrent of a piece.
-    pub fn piece_total_offset(&self, piece_idx: usize) -> usize {
-        piece_idx * self.piece_len
-    }
-
     // Returns the indexes of the first and last file that a piece intersects.
     pub fn piece_file_intersections(&self, piece_idx: usize) -> Range<usize> {
         debug_assert!(piece_idx < self.num_pieces as usize, "piece index out of bounds");
@@ -147,14 +142,5 @@ mod tests {
             assert_eq!(store_info.piece_file_intersections(idx), 1..2);
         }
         assert_eq!(store_info.piece_file_intersections(11073), 1..8);
-    }
-
-    #[test]
-    fn test_piece_offset() {
-        let metainfo = MetaInfo::new(std::path::Path::new("tests/test_torrents/test_multi.torrent")).unwrap();
-        let store_info = StoreInfo::new(&metainfo, std::path::PathBuf::from("freedom"));
-        assert_eq!(store_info.piece_total_offset(0), 0);
-        assert_eq!(store_info.piece_total_offset(1), 524288);
-        assert_eq!(store_info.piece_total_offset(11073), 5_805_441_024);
     }
 }

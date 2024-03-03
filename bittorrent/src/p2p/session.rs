@@ -35,17 +35,18 @@ pub struct PeerSession {
     // Internal send channel for disk reads.
     peer_tx: PeerTx,
 
-    // Bitfield of pieces the peer currently has.
-    bitfield: Bitfield,
-
-    state: SessionState,
-
     // Pending block requests from peer to the client.
     requests_in: HashSet<block::BlockInfo>,
 
     // Pending block requests from client to peer.
     requests_out: HashSet<block::BlockInfo>,
+    
+    // Bitfield of pieces the peer currently has.
+    bitfield: Bitfield,
 
+    state: SessionState,
+
+    
 }
 
 impl PeerSession {
@@ -173,6 +174,7 @@ impl PeerSession {
 
         self.state.conn_state = ConnState::Introducing;
         let (mut sink, mut stream) = socket.split();
+        let mut ticker = time::interval(time::Duration::from_secs(1));
 
         loop { tokio::select! {
 
@@ -185,13 +187,9 @@ impl PeerSession {
             Some(cmd) = self.peer_rx.recv() => {
                 match cmd {
 
-                    PeerCommand::BlockRead(block) => {
-                        tracing::info!("block read: {:?}", block);
-                    },
+                    PeerCommand::BlockRead(block) => self.send_block(&mut sink, block).await?,
 
-                    PeerCommand::PieceWritten(idx) => {
-                        self.handle_written_piece(&mut sink, idx).await?;
-                    },
+                    PeerCommand::PieceWritten(idx) => self.handle_written_piece(&mut sink, idx).await?,
 
                     PeerCommand::Shutdown => {
                         tracing::info!("session shutdown");
@@ -200,6 +198,8 @@ impl PeerSession {
                 
                 }
             }
+
+            _ = ticker.tick() => self.tick().await?,
 
             // TODO: change this, i think its a timeout.
             else => {
@@ -300,6 +300,7 @@ impl PeerSession {
         bitfield.resize(self.torrent_ctx.info.num_pieces as usize, false);
         // Interested if peer has pieces we don't.
         let interested = self.torrent_ctx.picker.piece_picker.write().await.bitfield_update(&bitfield);
+        self.state.update(|state| state.num_pieces = bitfield.count_ones() as usize);
         self.bitfield = bitfield;
         self.update_interest(sink, interested).await
     }
@@ -315,6 +316,7 @@ impl PeerSession {
             return Ok(());
         }
         self.bitfield.set(idx as usize, true);
+        self.state.update(|state| state.num_pieces += 1);
 
         let interested = self
             .torrent_ctx
@@ -327,12 +329,12 @@ impl PeerSession {
         self.update_interest(sink, interested).await
     }
 
-    async fn handle_block(&mut self, block_data: block::Block) -> Result<()> {
+    async fn handle_block(&mut self, block: block::Block) -> Result<()> {
         
         let block_info = block::BlockInfo {
-            piece_idx: block_data.piece_idx,
-            offset: block_data.offset,
-            len: block_data.data.len(),
+            piece_idx: block.piece_idx,
+            offset: block.offset,
+            len: block.data.len(),
         };
 
         // Checks block validity and removes from requests_out.
@@ -361,9 +363,14 @@ impl PeerSession {
         };
 
         if prev_block_state != BlockState::Received {
+            self.state.update(|state| state.throughput.down += block.data.len() as u64);
             self.torrent_ctx.disk_tx
-                .send(fs::CommandToDisk::WriteBlock { block: block_info, data: block_data.data.into_owned() })
+                .send(fs::CommandToDisk::WriteBlock { 
+                    id: self.torrent_ctx.id,
+                    block,
+                })
                 .map_err(|e| e.into())
+                
         } else {
             // Again, do we need to check for spamming?
             // Should allow when in end game mode.
@@ -389,6 +396,7 @@ impl PeerSession {
 
         self.requests_out.insert(block_info);
         self.torrent_ctx.disk_tx.send(fs::CommandToDisk::ReadBlock {
+            id: self.torrent_ctx.id,
             block: block_info,
             tx: self.peer_tx.clone(),
         })?;
@@ -458,7 +466,22 @@ impl PeerSession {
         Ok(())
     }
 
-    async fn send_block(&mut self, sink: &mut MessageSink, block: block::BlockData) -> Result<()> {
+    async fn send_block(&mut self, sink: &mut MessageSink, block: block::Block) -> Result<()> {
+        // TODO: just write a from/into for this.
+        let block_info = block::BlockInfo {
+            piece_idx: block.piece_idx,
+            offset: block.offset,
+            len: block.data.len(),
+        };
+
+        if !self.requests_in.remove(&block_info) {
+            tracing::warn!("block read but no request: {:?}", block_info);
+            return Ok(());
+        }
+
+        sink.send(Message::Block(block)).await?;
+        self.state.update(|state| state.throughput.up += block_info.len as u64);
+
         Ok(())
     }
 
@@ -483,5 +506,20 @@ impl PeerSession {
             self.state.interested = false;
         }
         Ok(())
+    }
+
+    async fn tick(&mut self) -> Result<()> {
+        // TODO: Check for inactivity.
+
+        if self.state.changed {
+            self.torrent_ctx.torrent_tx.send(torrent::CommandToTorrent::PeerState {
+                address: self.address,
+                state: self.state,
+            })?;
+        }
+        self.state.tick();
+        tracing::debug!("{:#?}", self.state);
+
+        Ok(())  
     }
 }

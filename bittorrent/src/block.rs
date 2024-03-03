@@ -22,8 +22,18 @@ impl BlockData {
     }
 }
 
+impl AsRef<[u8]> for BlockData {
+    fn as_ref(&self) -> &[u8] {
+        match self {
+            BlockData::Owned(data) => data.as_ref(),
+            BlockData::Cached(data) => data.as_ref(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Block {
+
     // Index of piece that the block is contained in.
     pub piece_idx: usize,
 
@@ -32,6 +42,7 @@ pub struct Block {
 
     // Data of block.
     pub data: BlockData,
+
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
@@ -43,12 +54,6 @@ pub struct BlockInfo {
 
     pub len: usize,
 
-}
-
-impl Block {
-    pub fn idx_in_piece(&self) -> usize {
-        self.offset / BLOCK_SIZE as usize
-    }
 }
 
 impl BlockInfo {

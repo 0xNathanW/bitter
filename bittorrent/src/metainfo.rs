@@ -29,7 +29,7 @@ pub enum MetaInfoError {
     FileAbsolutePath,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct File {
 
     // #[serde(deserialize_with = "crate::de::path_deserialize")]
@@ -41,7 +41,7 @@ struct File {
 
 }
 
-#[derive(Default, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 struct Info {
 
     // File name.
@@ -92,7 +92,7 @@ impl Info {
 }
 
 #[allow(dead_code)]
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct MetaInfo {
     
     // The announce URL of the tracker (string).
@@ -148,30 +148,6 @@ impl MetaInfo {
         }
 
         metainfo.info_hash = metainfo.info.info_hash()?;
-
-        // // Add offset & check for files with no size.
-        // if let Some(files) = metainfo.info.files.as_mut() {
-    
-        //     let mut offset = 0;
-        //     for file in files.iter_mut() {
-                
-        //         if file.path.is_absolute() || file.path == std::path::Path::new("/") {
-        //             return Err(MetaInfoError::FileAbsolutePath);
-        //         }
-                
-        //         if file.length == 0 {
-        //             return Err(MetaInfoError::FileNoSize);
-        //         }
-                
-        //         file.offset = offset;
-        //         offset += file.length;
-        //     }
-        // } else if let Some(len) = metainfo.info.length {
-        //     if len == 0 { return Err(MetaInfoError::FileNoSize); }
-        // } else {
-        //     return Err(MetaInfoError::FileNoSize);
-        // }
-
         tracing::debug!("metainfo created: {:#?}", metainfo);
         Ok(metainfo)
     }

@@ -1,8 +1,7 @@
-use std::{io::{Seek, Write}, ops::Range};
+use std::{io::{Seek, Write}, ops::Range, sync};
 use sha1::{Sha1, Digest};
-use std::sync;
-use crate::BLOCK_SIZE;
-use super::{TorrentFile, Result};
+use crate::{block::Block, BLOCK_SIZE};
+use super::{torrent::TorrentFile, Result};
 
 #[derive(Debug)]
 pub struct Piece {
@@ -28,15 +27,14 @@ pub struct Piece {
 
 impl Piece {
 
-    pub fn add_block(&mut self, offset: usize, data: Vec<u8>) {
-        debug_assert!(offset + data.len() <= self.length, "block offset out of range");
-        let block_idx = offset / BLOCK_SIZE;
+    pub fn add_block(&mut self, block: &Block) {
+        let block_idx = block.offset / BLOCK_SIZE;
         if self.blocks_received[block_idx] {
-            tracing::warn!("duplicate block at offset {}", offset);
+            tracing::warn!("duplicate block in piece {} at offset {}", block.piece_idx, block.offset);
         } else {
             self.blocks_received[block_idx] = true;
             self.num_blocks_received += 1;
-            self.data[offset..offset + data.len()].copy_from_slice(&data);
+            self.data[block.offset..block.offset + block.data.len()].copy_from_slice(block.data.as_ref());
         }
     }
 
@@ -65,13 +63,14 @@ impl Piece {
             let bytes_remaining = std::cmp::min(piece_remaining, file_remaining);
             
             // seek to the correct position in the file
+            // TODO: do we only have to seek on the first file?
             f.handle.seek(std::io::SeekFrom::Start(file_offset as u64)).unwrap();
             let n = f.handle.write(&self.data[bytes_written..bytes_written + bytes_remaining]).unwrap();
             
             total_offset += n;
             bytes_written += n;
         }
-        debug_assert_eq!(bytes_written, self.length);
+        debug_assert_eq!(bytes_written, self.length, "not all bytes written to disk");
         Ok(())
     }
 }
