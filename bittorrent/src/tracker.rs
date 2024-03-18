@@ -168,13 +168,14 @@ pub struct AnnounceParams {
     // Port number.
     pub port:       u16,
     
-    // Total amount uploaded.
+    // The total amount uploaded (since the client sent the 'started' event to the tracker) in base ten ASCII..
     pub uploaded:   u64,
     
-    // Total bytes downloaded.
+    // The total amount downloaded (since the client sent the 'started' event to the tracker) in base ten ASCII..
     pub downloaded: u64,
     
-    // Total bytes left to download.
+    // The number of bytes this client still has to download in base ten ASCII. 
+    // Clarification: The number of bytes needed to download to be 100% complete and get all the included files in the torrent.
     pub left:       u64,
     
     // If specified, must be one of started, completed, stopped, (or empty which is the same as not being specified). 

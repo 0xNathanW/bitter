@@ -1,25 +1,31 @@
 use crossterm::event::{Event, EventStream};
 use futures::StreamExt;
-use tokio::{sync::mpsc, task::JoinHandle};
+use tokio::{sync::{mpsc, oneshot}, task::JoinHandle};
 
 pub type EventRx = mpsc::UnboundedReceiver<Event>;
 pub type EventTx = mpsc::UnboundedSender<Event>;
 
-pub fn spawn_events() -> (JoinHandle<()>, EventRx) {
+pub fn spawn_events() -> (JoinHandle<()>, EventRx, oneshot::Sender<()>) {
     let (tx, rx) = mpsc::unbounded_channel();
+    let (sd_tx, sd_rx) = oneshot::channel::<()>();
 
     let handle = tokio::spawn(async move {
         let mut reader = EventStream::new();
-        while let Some(event) = reader.next().await {
-            match event {
-                Ok(event) => {
-                    tx.send(event).unwrap();
-                },
-                Err(_) => {
-                    continue;
+        tokio::select! {
+            Some(event) = reader.next() => {
+                match event {
+                    Ok(event) => {
+                        tx.send(event).unwrap();
+                    },
+                    Err(_) => {}
                 }
+            }
+
+            _ = sd_rx => {
+                return;
             }
         }
     });
-    (handle, rx)
+
+    (handle, rx, sd_tx)
 }

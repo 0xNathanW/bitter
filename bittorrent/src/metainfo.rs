@@ -2,8 +2,6 @@ use rand::seq::SliceRandom;
 use serde_derive::{Deserialize, Serialize};
 use crate::{store::FileInfo, tracker::Tracker};
 
-// Alot of this file should only be used inside torrent.new();
-
 #[derive(Debug, thiserror::Error)]
 pub enum MetaInfoError {
 
@@ -30,52 +28,52 @@ pub enum MetaInfoError {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-struct File {
+pub struct File {
 
     // #[serde(deserialize_with = "crate::de::path_deserialize")]
-    path: Vec<String>,
+    pub path: Vec<String>,
 
-    length: u64,
+    pub length: u64,
 
-    md5sum: Option<String>,
+    pub md5sum: Option<String>,
 
 }
 
 #[derive(Clone, Deserialize, Serialize)]
-struct Info {
+pub struct Info {
 
-    // File name.
-    name: String,
+    // File namepub .
+    pub name: String,
     
     // String consisting of the concatenation of all 20-byte SHA1 hash values, one per piece.
     #[serde(with = "serde_bytes")]
-    pieces: Vec<u8>,
+    pub pieces: Vec<u8>,
 
     // Number of bytes in each piece (integer).
     #[serde(rename = "piece length")]
-    piece_length: u32,
+    pub piece_length: u32,
 
     // A 32-character hexadecimal string corresponding to the MD5 sum of the file.
     #[serde(default)]
-    md5sum: Option<String>,
+    pub md5sum: Option<String>,
     
     // Length of the file in bytes (integer).
     #[serde(default)]
-    length: Option<u64>,
+    pub length: Option<u64>,
 
     // A list of dictionaries, one for each file.
     #[serde(default)]
-    files: Option<Vec<File>>,
+    pub files: Option<Vec<File>>,
     
     // If it is set to "1", the client MUST publish its presence to get other peers ONLY 
     // via the trackers explicitly described in the metainfo file. If this field is set to 
     // "0" or is not present, the client may obtain peer from other means, e.g. PEX peer exchange, dht.
     #[serde(default)]
-    private: Option<u8>,
+    pub private: Option<u8>,
 
     #[serde(default)]
     #[serde(rename = "root hash")]
-    root_hash: Option<String>,
+    pub root_hash: Option<String>,
 
 }
 
@@ -97,39 +95,39 @@ pub struct MetaInfo {
     
     // The announce URL of the tracker (string).
     #[serde(deserialize_with = "crate::de::url_deserialize")]
-    announce: url::Url,
+    pub announce: url::Url,
     
     // A dictionary that describes the file(s) of the torrent.
-    info: Info,
+    pub info: Info,
     
     // sha1 hash of info dict
-    #[serde(skip)]
-    info_hash: [u8; 20],
+    #[serde(skip)] 
+    pub info_hash: [u8; 20],
     
     // (optional) the string encoding format used to generate the pieces part of the info 
     // dictionary in the .torrent metafile (string).
     #[serde(default)]
-    encoding: Option<String>,
+    pub encoding: Option<String>,
     
     // (optional) this is an extention to the official specification, offering backwards-compatibility.
     #[serde(default)]
     #[serde(rename = "announce-list")]
     #[serde(deserialize_with = "crate::de::announce_list_deserialize")]
-    announce_list: Option<Vec<Vec<url::Url>>>,
+    pub announce_list: Option<Vec<Vec<url::Url>>>,
     
     // (optional) the creation time of the torrent, in standard UNIX epoch format.
     #[serde(default)]
     #[serde(rename = "creation date")]
-    creation_date: Option<i64>,
+    pub creation_date: Option<i64>,
     
     // (optional) free-form textual comments of the author (string).
     #[serde(rename = "comment")]
-    comment: Option<String>,
+    pub comment: Option<String>,
     
     // (optional) name and version of the program used to create the .torrent (string).
     #[serde(default)]
     #[serde(rename = "created by")]
-    created_by: Option<String>,
+    pub created_by: Option<String>,
     
 }
 
@@ -180,7 +178,6 @@ impl MetaInfo {
     
     pub fn name(&self) -> &str { &self.info.name }
 
-    // Uses take to avoid cloning on announce list.
     pub fn trackers(&self) -> Vec<Vec<Tracker>> {
         // If announce_list is present, we use that.
         if let Some(announce_list) = self.announce_list.clone() {

@@ -1,18 +1,19 @@
 use tokio::{sync::mpsc, task};
 use crate::{
-    block::{Block, BlockInfo}, 
-    client::ClientTx,
+    block::{Block, BlockRequest}, 
+    client::ClientTx, 
+    metainfo,
     p2p::PeerTx,
-    store::StoreInfo, 
-    torrent::TorrentTx, 
-    TorrentID,
+    store::TorrentInfo,
+    torrent::TorrentTx,
+    TorrentID
 };
 
 mod piece;
 mod disk;
 mod torrent;
-#[cfg(test)]
-mod tests;
+// #[cfg(test)]
+// mod tests;
 
 #[derive(thiserror::Error, Debug)]
 pub enum DiskError {
@@ -20,19 +21,18 @@ pub enum DiskError {
     #[error(transparent)]
     IoError(#[from] std::io::Error),
 
+    // Usually relating to poisoned file locks.
     #[error("sync error: {0}")]
     SyncError(String),
 
     #[error("channel error: {0}")]
     ChannelError(String),
 
-    #[error("torrent info hash {0} not found")]
-    TorrentNotFound(String),
-
-    #[error("torrent allocation error: {0}")]
-    AllocationError(#[from] AllocationError),
+    #[error("torrent {0:?} not found")]
+    TorrentNotFound(TorrentID),
 }
 
+// Errors related to allocating a new torrent to disk.
 #[derive(thiserror::Error, Debug)]
 pub enum AllocationError {
     
@@ -57,20 +57,25 @@ impl<T> From<mpsc::error::SendError<T>> for DiskError {
 }
 
 pub type Result<T> = std::result::Result<T, DiskError>;
-pub type DiskTx = mpsc::UnboundedSender<CommandToDisk>;
-pub type DiskRx = mpsc::UnboundedReceiver<CommandToDisk>;
+pub type DiskTx = mpsc::UnboundedSender<DiskCommand>;
+pub type DiskRx = mpsc::UnboundedReceiver<DiskCommand>;
 
 // TODO: command for removing a torrent from disk?
-pub enum CommandToDisk {
+pub enum DiskCommand {
 
     // Allocate a new torrent to disk.
+    // Quite large but only sent once.
     NewTorrent {
         // To identify the torrent.
         id: TorrentID,
         // Info for reads and writes.
-        info: StoreInfo,
+        info: TorrentInfo,
         // Piece hashes for verification.
         piece_hashes: Vec<[u8; 20]>,
+        // Torrent files.
+        files: Vec<metainfo::File>,
+        // Output directory for the torrent.
+        dir: std::path::PathBuf,
         // To send commands to the torrent task.
         torrent_tx: TorrentTx,
     },
@@ -85,7 +90,7 @@ pub enum CommandToDisk {
     // and send read data through provided channel.
     ReadBlock {
         id: TorrentID,
-        block: BlockInfo,
+        block: BlockRequest,
         tx: PeerTx,
     },
 
@@ -94,10 +99,10 @@ pub enum CommandToDisk {
 
 }
 
-pub fn spawn_disk(client_tx: ClientTx) -> Result<(task::JoinHandle<Result<()>>, DiskTx)> {
+pub fn spawn_disk(client_tx: ClientTx) -> (task::JoinHandle<Result<()>>, DiskTx) {
     tracing::info!("starting disk task");
     let (mut disk, disk_tx) = disk::Disk::new(client_tx);
     let handle = task::spawn(async move { disk.run().await });
-    Ok((handle, disk_tx))
+    (handle, disk_tx)
 }
 

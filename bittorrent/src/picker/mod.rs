@@ -1,6 +1,6 @@
 use std::collections::{HashSet, HashMap};
 use tokio::sync::RwLock;
-use crate::{block::BlockInfo, Bitfield};
+use crate::{block::BlockRequest, Bitfield};
 
 pub mod piece_picker;
 pub mod partial_piece;
@@ -31,10 +31,10 @@ impl Picker {
 
     pub async fn pick_blocks(
         &self,
-        current_requests: &HashSet<BlockInfo>,
+        current_requests: &HashSet<BlockRequest>,
         target_queue_len: usize,
         bf: &Bitfield,
-    ) -> Vec<BlockInfo> {
+    ) -> Vec<BlockRequest> {
 
         let mut requests = vec![];
         let mut remaining = target_queue_len.saturating_sub(current_requests.len());
@@ -128,8 +128,8 @@ mod tests {
         
         // Endgame with blocks already in queue.
         let mut previous_requests = HashSet::new();
-        previous_requests.insert(BlockInfo { piece_idx: 0, offset: 0, len: BLOCK_SIZE });
-        previous_requests.insert(BlockInfo { piece_idx: 1, offset: 0, len: BLOCK_SIZE });
+        previous_requests.insert(BlockRequest { piece_idx: 0, offset: 0, len: BLOCK_SIZE });
+        previous_requests.insert(BlockRequest { piece_idx: 1, offset: 0, len: BLOCK_SIZE });
         let requests_3 = picker.pick_blocks(&previous_requests, 4, &bf).await;
         assert_eq!(requests_3.len(), 2);
     }

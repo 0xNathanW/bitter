@@ -1,12 +1,19 @@
 use std::collections::HashSet;
-use crate::{block::{BlockInfo, block_len, num_blocks}, BLOCK_SIZE};
+use crate::{block::*, BLOCK_SIZE};
 
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
 pub enum BlockState {
+    
+    // Block has not been requested.
     #[default]
     Free,
+    
+    // Block has been requested by at least 1 peer.
     Requested,
+    
+    // Block has been received.
     Received,
+
 }
 
 #[derive(Debug)]
@@ -33,7 +40,7 @@ impl PartialPiece {
         }
     }
     
-    pub fn free_block(&mut self, block: &BlockInfo) {
+    pub fn free_block(&mut self, block: &BlockRequest) {
         assert!(block.piece_idx == self.idx);
         self.blocks_states[block.idx_in_piece()] = BlockState::Free
     }
@@ -42,22 +49,26 @@ impl PartialPiece {
         self.blocks_states.iter_mut().for_each(|b| *b = BlockState::Free)
     }
     
-    // Returns the state the block was previously in, to check for duplicates.
-    pub fn received_block(&mut self, block: &BlockInfo) -> BlockState {
-        assert!(block.piece_idx == self.idx);
+    // Returns whether the block is a duplicate (already recieved).
+    pub fn received_block(&mut self, block: &BlockRequest) -> bool {
         let block_state = &mut self.blocks_states[block.idx_in_piece()];
-        assert!(*block_state != BlockState::Free);
-        let prev_state = *block_state;
-        *block_state = BlockState::Received;
-        prev_state
+        // If we received a block, it must have been requested.
+        match *block_state {
+            BlockState::Free => unreachable!("Can't receive a block that wasn't requested"),
+            BlockState::Requested => {
+                *block_state = BlockState::Received;
+                false
+            },
+            BlockState::Received => true,
+        }
     }
 
     // Pick open blocks sequentially within a partially downloaded piece.
     pub fn pick_next_blocks(
         &mut self,
         num: usize,
-        buf: &mut Vec<BlockInfo>,
-        prev: &HashSet<BlockInfo>,
+        buf: &mut Vec<BlockRequest>,
+        prev: &HashSet<BlockRequest>,
         end_game: bool,
     ) -> usize {
         let mut num_picked = 0;
@@ -68,7 +79,7 @@ impl PartialPiece {
             
             if *block == BlockState::Free {
                 assert!(!end_game);
-                buf.push(BlockInfo {
+                buf.push(BlockRequest {
                     piece_idx: self.idx,
                     offset: i * BLOCK_SIZE as usize,
                     len: block_len(self.len, i)
@@ -78,7 +89,7 @@ impl PartialPiece {
 
             } else if end_game && *block == BlockState::Requested {
                 
-                let block_info = BlockInfo {
+                let block_info = BlockRequest {
                     piece_idx: self.idx,
                     offset: i * BLOCK_SIZE as usize,
                     len: block_len(self.len, i),

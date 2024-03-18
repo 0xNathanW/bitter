@@ -40,6 +40,11 @@ impl PiecePicker {
         &self.have
     }
 
+    pub fn set_own_bitfield(&mut self, bf: Bitfield) {
+        debug_assert_eq!(bf.len(), self.have.len());
+        self.have = bf;
+    }
+
     pub fn increment_piece(&mut self, idx: usize) -> bool {
         assert!(idx < self.pieces.len());
         self.pieces[idx].frequency += 1;
@@ -51,16 +56,19 @@ impl PiecePicker {
         self.have.set(idx, true);
     }
 
+    // Will return true if there is at least one piece that peer has and we don't.
     pub fn bitfield_update(&mut self, bf: &Bitfield) -> bool {
-        assert_eq!(bf.len(), self.have.len());
+        debug_assert_eq!(bf.len(), self.have.len());
         let mut interested = false;
-        bf.iter().enumerate().for_each(|(i, b)| {
-            if *b { 
+        bf
+            .iter()
+            .enumerate()
+            .filter(|(_, b)| **b)
+            .for_each(|(i, _)| {
                 self.pieces[i].frequency += 1;
                 if !self.have[i] {
                     interested = true;
                 }
-            }
         });
         interested
     }

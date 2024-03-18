@@ -1,5 +1,8 @@
-use crate::{store::StoreInfo, BLOCK_SIZE};
+use crate::{store::TorrentInfo, BLOCK_SIZE};
 
+// The data of a block can either be:
+// 1. Owned - when peer sends us the data.
+// 2. Cached - when we have the data cached and we need to share it with peers.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BlockData {
     Owned(Vec<u8>),
@@ -7,6 +10,7 @@ pub enum BlockData {
 }
 
 impl BlockData {
+
     pub fn len(&self) -> usize {
         match self {
             BlockData::Owned(data) => data.len(),
@@ -45,8 +49,18 @@ pub struct Block {
 
 }
 
+impl Block {
+    pub fn from_block_request(info: &BlockRequest, data: BlockData) -> Self {
+        Self {
+            piece_idx: info.piece_idx,
+            offset: info.offset,
+            data,
+        }
+    }
+}
+
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
-pub struct BlockInfo {
+pub struct BlockRequest {
 
     pub piece_idx: usize,
 
@@ -56,12 +70,20 @@ pub struct BlockInfo {
 
 }
 
-impl BlockInfo {
+impl BlockRequest {
+    pub fn from_block(block: &Block) -> Self {
+        Self {
+            piece_idx: block.piece_idx,
+            offset: block.offset,
+            len: block.data.len(),
+        }
+    }
+
     pub fn idx_in_piece(&self) -> usize {
         self.offset / BLOCK_SIZE as usize
     }
 
-    pub fn is_valid(&self, info: &StoreInfo) -> bool {
+    pub fn is_valid(&self, info: &TorrentInfo) -> bool {
         if self.piece_idx >= info.num_pieces as usize {
             return false;
         }

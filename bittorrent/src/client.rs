@@ -1,24 +1,15 @@
 use std::collections::HashMap;
-use tokio::{sync::mpsc, task};
+use tokio::{sync::mpsc, task::JoinHandle};
 use crate::{
-    config::{ClientConfig, TorrentConfig}, 
-    fs::{self, CommandToDisk}, 
-    metainfo::MetaInfo, 
-    store::StoreInfo, 
-    torrent::{self, Torrent, TorrentParams}, 
-    CommandToUser, 
-    TorrentID, 
-    UserTx,
+    config::Config, disk::{self, AllocationError, DiskCommand, DiskError, DiskTx}, metainfo::MetaInfo, store::TorrentInfo, torrent::{self, Torrent, TorrentParams, TorrentTx}, Bitfield, TorrentID, UserCommand, UserTx
 };
 
+// What can go wrong when using the client.
 #[derive(thiserror::Error, Debug)]
 pub enum ClientError {
-        
-        // #[error(transparent)]
-        // TorrentError(#[from] torrent::TorrentError),
     
         #[error(transparent)]
-        DiskError(#[from] fs::DiskError),
+        DiskError(#[from] DiskError),
     
         #[error("channel error: {0}")]
         ChannelError(String),
@@ -31,49 +22,47 @@ impl<T> From<mpsc::error::SendError<T>> for ClientError {
     }
 }
 
-pub enum CommandToClient {
+pub enum ClientCommand {
 
-    NewTorrent {
-        id:         TorrentID,
-        metainfo:   MetaInfo,
-        config:     Option<TorrentConfig>,
+    NewTorrent(MetaInfo),
+
+    TorrentAllocation {
+        id: TorrentID,
+        res: std::result::Result<Bitfield, AllocationError>,
     },
 
-    TorrentAllocation(std::result::Result<TorrentID, fs::AllocationError>),
-
-    DiskFailure(fs::DiskError),
+    DiskFailure(DiskError),
 
     Shutdown,
 
 }
 
 pub type Result<T> = std::result::Result<T, ClientError>;
-pub type ClientRx = mpsc::UnboundedReceiver<CommandToClient>;
-pub type ClientTx = mpsc::UnboundedSender<CommandToClient>;
+pub type ClientRx = mpsc::UnboundedReceiver<ClientCommand>;
+pub type ClientTx = mpsc::UnboundedSender<ClientCommand>;
 
 pub struct ClientHandle {
 
     client_tx: ClientTx,
 
-    handle: Option<task::JoinHandle<Result<()>>>
+    handle: Option<JoinHandle<Result<()>>>
 
 }
 
 // These are the methods that the user will use to interact with the client.
 impl ClientHandle {
 
-    pub fn new(client_tx: ClientTx, handle: task::JoinHandle<Result<()>>) -> Self {
+    pub fn new(client_tx: ClientTx, handle: JoinHandle<Result<()>>) -> Self {
         Self { client_tx, handle: Some(handle) }
     }
 
-    pub fn new_torrent(&self, metainfo: MetaInfo, config: Option<TorrentConfig>) -> Result<TorrentID> {
-        let id = metainfo.info_hash();
-        self.client_tx.send(CommandToClient::NewTorrent { id, metainfo, config })?;
-        Ok(id)
+    pub fn new_torrent(&self, metainfo: MetaInfo) -> Result<()> {
+        self.client_tx.send(ClientCommand::NewTorrent(metainfo))?;
+        Ok(())
     }
 
     pub async fn shutdown(&mut self) -> Result<()> {
-        self.client_tx.send(CommandToClient::Shutdown)?;
+        self.client_tx.send(ClientCommand::Shutdown)?;
         if let Err(e) = self
             .handle
             .take()
@@ -90,9 +79,9 @@ impl ClientHandle {
 
 struct TorrentHandle {
 
-    torrent_tx: torrent::TorrentTx,
+    torrent_tx: TorrentTx,
 
-    handle: Option<tokio::task::JoinHandle<torrent::Result<()>>>
+    handle: Option<JoinHandle<torrent::Result<()>>>
 
 }
 
@@ -104,20 +93,20 @@ pub struct Client {
 
     user_tx: UserTx,
 
-    disk_tx: fs::DiskTx,
+    disk_tx: DiskTx,
 
-    disk_handle: Option<task::JoinHandle<fs::Result<()>>>,
+    disk_handle: Option<JoinHandle<disk::Result<()>>>,
 
-    config: ClientConfig,
+    config: Config,
 
 }
 
 impl Client {
     
-    pub fn new(config: ClientConfig, user_tx: UserTx) -> Result<(Self, ClientTx)> {
+    pub fn new(config: Config, user_tx: UserTx) -> (Self, ClientTx) {
         let (client_tx, client_rx) = mpsc::unbounded_channel();
-        let (disk_handle, disk_tx) = fs::spawn_disk(client_tx.clone())?;
-        Ok((
+        let (disk_handle, disk_tx) = disk::spawn_disk(client_tx.clone());
+        (
             Client {
                 torrents: HashMap::new(),
                 client_rx,
@@ -127,37 +116,41 @@ impl Client {
                 config,
             },
             client_tx,
-        ))
+        )
     }
 
     pub async fn run(&mut self) -> Result<()> {
 
         while let Some(cmd) = self.client_rx.recv().await {
             match cmd {
-             
-                CommandToClient::NewTorrent { 
-                    id,
-                    metainfo,
-                    config,
-                } => self.new_torrent(id, metainfo, config).await?,
+                
+                ClientCommand::NewTorrent(metainfo) => self.new_torrent(metainfo).await?,
 
-                CommandToClient::TorrentAllocation(id) => {
-                    match id {
-                        Ok(id) => tracing::info!("torrent {} allocated", hex::encode(id)),
+                ClientCommand::TorrentAllocation { id, res } => {
+                    match res {
+                        Ok(bf) => {
+                            tracing::info!("torrent {} allocated", hex::encode(id));
+                            if let Some(t) = self.torrents.get_mut(&id) {
+                                t.torrent_tx.send(torrent::TorrentCommand::Bitfield(bf))?;
+                            }
+                        },
                         Err(e) => {
                             tracing::error!("torrent allocation error: {}", e);
-                            self.user_tx.send(CommandToUser::TorrentError(e.to_string()))?;
+                            if let Some(t) = self.torrents.get_mut(&id) {
+                                t.torrent_tx.send(torrent::TorrentCommand::Shutdown).ok();
+                            }
+                            self.user_tx.send(UserCommand::TorrentResult { id, result: Err(e.into()) })?;
                         }
                     }
                 },
 
                 // Client can't continue if the disk fails.
-                CommandToClient::DiskFailure(e) => {
+                ClientCommand::DiskFailure(e) => {
                     self.shutdown().await?;
                     return Err(ClientError::DiskError(e))
                 },
 
-                CommandToClient::Shutdown => return self.shutdown().await,
+                ClientCommand::Shutdown => return self.shutdown().await,
 
             }
         }
@@ -165,29 +158,45 @@ impl Client {
         Ok(())
     }
 
-    async fn new_torrent(&mut self, id: TorrentID, metainfo: MetaInfo, config: Option<TorrentConfig>) -> Result<()> {
+    async fn new_torrent(&mut self, metainfo: MetaInfo) -> Result<()> {
         
-        let torrent_config = config.unwrap_or_default();
-        let info = StoreInfo::new(&metainfo, torrent_config.output_dir.clone());
+        let id = metainfo.info_hash();
+        let info: TorrentInfo = TorrentInfo::new(&metainfo);
         let piece_hashes = metainfo.piece_hashes();
-        
+
         let (mut torrent, torrent_tx) = Torrent::new(TorrentParams {
             id,
+            info: info.clone(),
+            info_hash: metainfo.info_hash(),
             client_id: self.config.client_id,
-            metainfo,
-            config: torrent_config,
+            trackers: metainfo.trackers(),
+            config: self.config.clone(),
             disk_tx: self.disk_tx.clone(),
             user_tx: self.user_tx.clone(),
         });
 
-        self.disk_tx.send(CommandToDisk::NewTorrent {
+        // If the torrent is single file, create a single element vector. 
+        let files = if let Some(files) = metainfo.info.files {
+            files
+        } else {
+            vec![crate::metainfo::File {
+                path: vec![metainfo.info.name.clone()],
+                length: metainfo.total_len(),
+                md5sum: metainfo.info.md5sum,
+            }]
+        };
+
+        // Tell the disk to allocate the torrent.
+        self.disk_tx.send(DiskCommand::NewTorrent {
             id,
             info,
             piece_hashes,
+            files,
+            dir: self.config.dir.clone(),
             torrent_tx: torrent_tx.clone(),
         })?;
 
-        let handle = task::spawn(async move { torrent.start().await });
+        let handle = tokio::task::spawn(async move { torrent.start().await });
         self.torrents.insert(
             id,
             TorrentHandle {
@@ -203,7 +212,7 @@ impl Client {
         
         for torrent in self.torrents.values_mut() {
             // Some torrents may have already been shut down so don't return err.
-            torrent.torrent_tx.send(torrent::CommandToTorrent::Shutdown).ok();
+            torrent.torrent_tx.send(torrent::TorrentCommand::Shutdown).ok();
         }
 
         for torrent in self.torrents.values_mut() {
@@ -218,7 +227,7 @@ impl Client {
             }
         }
 
-        self.disk_tx.send(CommandToDisk::Shutdown)?;
+        self.disk_tx.send(DiskCommand::Shutdown)?;
         if let Err(e) = self
             .disk_handle
             .take()

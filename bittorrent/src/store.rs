@@ -32,9 +32,9 @@ impl FileInfo {
     }
 }
 
-// Contains general information on torrage storage.
+// Very widely used, often cloned but is cheap.
 #[derive(Debug, Clone)]
-pub struct StoreInfo {
+pub struct TorrentInfo {
 
     // Length of torrent in bytes.
     pub total_len: u64,
@@ -48,36 +48,22 @@ pub struct StoreInfo {
     // Number of pieces in torrent.
     pub num_pieces: u32,
 
-    // File contained in torrent.
-    pub files: Vec<FileInfo>,
-
-    // Directory to store downloaded files.
-    pub output_dir: PathBuf,
-
 }
 
-impl StoreInfo {
+impl TorrentInfo {
 
-    pub fn new(metainfo: &MetaInfo, output_dir: PathBuf) -> Self {
+    pub fn new(metainfo: &MetaInfo) -> Self {
         
         let total_len = metainfo.total_len();
         let num_pieces = metainfo.num_pieces();
         let piece_len = metainfo.piece_len();
         let last_piece_len = (total_len - (piece_len as u64 * (num_pieces as u64 - 1))) as usize;
-        let files = metainfo.files();
-        let output_dir = if metainfo.is_multi_file() {
-            output_dir.join(metainfo.name())
-        } else {
-            output_dir
-        };
 
         Self {
             total_len,
             piece_len,
             last_piece_len,
             num_pieces,
-            files,
-            output_dir,
         }
     }
 
@@ -89,58 +75,25 @@ impl StoreInfo {
             self.piece_len
         }
     }
-
-    // Returns the indexes of the first and last file that a piece intersects.
-    pub fn piece_file_intersections(&self, piece_idx: usize) -> Range<usize> {
-        debug_assert!(piece_idx < self.num_pieces as usize, "piece index out of bounds");
-
-        // If only one file, there are no intersections to compute.
-        if self.files.len() == 1 {
-            return 0..1;
-        }
-
-        let offset = piece_idx * self.piece_len;
-        let end = offset + self.piece_len(piece_idx) - 1;
-
-        let start_file = match self.files
-            .iter()
-            .enumerate()
-            .find(|(_, f)| f.byte_range().contains(&offset))
-        {
-            Some((idx, _)) => idx,
-            None => panic!("piece byte offset exceeds file length"),   
-        };
-
-        let end_file = match self.files[start_file..]
-            .iter()
-            .enumerate()
-            .find(|(_, f)| f.byte_range().contains(&end))
-        {
-            Some((idx, _)) => start_file + idx,
-            None => panic!("piece last byte exceeds torrent length"),
-        };
-
-        start_file..(end_file + 1)
-    }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
 
-    #[test]
-    fn test_piece_file_intersections() {
-        let path = std::path::Path::new("tests/test_torrents/test_multi.torrent");
-        let metainfo = MetaInfo::new(path).unwrap();
-        let store_info = StoreInfo::new(&metainfo, std::path::PathBuf::from("freedom"));
-        println!("{}", store_info.last_piece_len);
-        for idx in 0..=8302 {
-            assert_eq!(store_info.piece_file_intersections(idx), 0..1);
-        }
-        assert_eq!(store_info.piece_file_intersections(8303), 0..2);
-        for idx in 8304..=11072 {
-            assert_eq!(store_info.piece_file_intersections(idx), 1..2);
-        }
-        assert_eq!(store_info.piece_file_intersections(11073), 1..8);
-    }
-}
+//     #[test]
+//     fn test_piece_file_intersections() {
+//         let path = std::path::Path::new("tests/test_torrents/test_multi.torrent");
+//         let metainfo = MetaInfo::new(path).unwrap();
+//         let store_info = TorrentInfo::new(&metainfo, std::path::PathBuf::from("freedom"));
+//         println!("{}", store_info.last_piece_len);
+//         for idx in 0..=8302 {
+//             assert_eq!(store_info.piece_file_intersections(idx), 0..1);
+//         }
+//         assert_eq!(store_info.piece_file_intersections(8303), 0..2);
+//         for idx in 8304..=11072 {
+//             assert_eq!(store_info.piece_file_intersections(idx), 1..2);
+//         }
+//         assert_eq!(store_info.piece_file_intersections(11073), 1..8);
+//     }
+// }

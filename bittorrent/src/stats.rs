@@ -1,13 +1,13 @@
-use std::time;
-
-use crate::p2p::state::SessionState;
+use crate::{p2p::state::SessionState, torrent::TorrentState};
 
 #[derive(Debug, Default)]
 pub struct TorrentStats {
 
-    pub start_time: Option<time::Instant>,
+    pub start_time: Option<std::time::Instant>,
 
-    pub time_elapsed: time::Duration,
+    pub time_elapsed: std::time::Duration,
+
+    pub state: TorrentState,
 
     pub piece_stats: PieceStats,
 
@@ -34,7 +34,7 @@ impl PieceStats {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct PeerStats {
 
     pub address: std::net::SocketAddr,
@@ -44,6 +44,15 @@ pub struct PeerStats {
     pub num_pieces: usize,
 
     pub throughput: ThroughputStats,
+
+}
+
+#[derive(Debug, Clone)]
+pub struct TrackerStats {
+
+    pub url: url::Url,
+
+    pub num_peers: usize,
 
 }
 

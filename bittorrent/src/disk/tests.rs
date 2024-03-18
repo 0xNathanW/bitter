@@ -4,9 +4,9 @@ use tokio::sync::mpsc;
 use crate::{
     block::*,
     client::CommandToClient,
-    fs::{spawn_disk, CommandToDisk},
+    disk::{spawn_disk, CommandToDisk},
     p2p::PeerCommand,
-    store::StoreInfo,
+    store::TorrentInfo,
     torrent::CommandToTorrent,
     MetaInfo,
     BLOCK_SIZE,
@@ -24,7 +24,7 @@ async fn test_disk_read() -> Result<(), Box<dyn std::error::Error>> {
 
     let metainfo = MetaInfo::new(Path::new(TEST_TORRENT_FILE_PATH))?;
     let id = metainfo.info_hash();
-    let info = StoreInfo::new(&metainfo, TEST_TORRENT_DIR_PATH.into());
+    let info = TorrentInfo::new(&metainfo, TEST_TORRENT_DIR_PATH.into());
     let (client_tx, mut client_rx) = mpsc::unbounded_channel();
     let (torrent_tx, _) = mpsc::unbounded_channel();
     let (_, disk_tx) = spawn_disk(client_tx)?;
@@ -98,7 +98,7 @@ async fn test_disk_write() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let temp_dir = tempfile::TempDir::new_in(TEST_TORRENT_DIR_PATH)?;
-    let info = StoreInfo::new(&metainfo, temp_dir.path().into());
+    let info = TorrentInfo::new(&metainfo, temp_dir.path().into());
 
     let last_piece_idx = metainfo.num_pieces() as usize - 1;
     let last_piece_len = info.piece_len(last_piece_idx);

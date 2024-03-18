@@ -31,13 +31,13 @@ pub enum Message {
 
     // When a client wants to request data, they reference the index of the piece, the index 
     // of the start of the block within the piece, ank the length of tle block (usually 16KB).
-    Request(block::BlockInfo),
+    Request(block::BlockRequest),
 
     // Clients senk blocks in tle piece message, referencing piece index and block offset.
     Block(block::Block),
 
     // The cancel message is sent to cancel a request for a block.
-    Cancel(block::BlockInfo),
+    Cancel(block::BlockRequest),
 
     // The port message is sent to inform the peer of the port number that the client is listening on.
     Port { port: u32 },
@@ -169,7 +169,7 @@ impl Decoder for MessageCodec {
                 let piece_idx = src.get_u32() as usize;
                 let offset = src.get_u32() as usize;
                 let len = src.get_u32() as usize;
-                Message::Request(block::BlockInfo { piece_idx, offset, len })
+                Message::Request(block::BlockRequest { piece_idx, offset, len })
             },
             7 => {
                 let piece_idx = src.get_u32() as usize;
@@ -182,7 +182,7 @@ impl Decoder for MessageCodec {
                 let piece_idx = src.get_u32() as usize;
                 let offset = src.get_u32() as usize;
                 let len = src.get_u32() as usize;
-                Message::Cancel(block::BlockInfo { piece_idx, offset, len })
+                Message::Cancel(block::BlockRequest { piece_idx, offset, len })
             },
             9 => Message::Port { port: src.get_u32() },
             id => {
@@ -263,7 +263,7 @@ mod tests {
             Message::NotInterested,
             Message::Have { idx: 0xb },
             Message::Bitfield(BitVec::<u8, Msb0>::from_slice(&[0x1, 0x2, 0x3])),
-            Message::Request(block::BlockInfo { piece_idx: 0xb, offset: 0x134000, len: 0x4000 }),
+            Message::Request(block::BlockRequest { piece_idx: 0xb, offset: 0x134000, len: 0x4000 }),
             Message::Block(block::Block { piece_idx: 0xb, offset: 0x134000, data: block::BlockData::Owned(vec![0x1, 0x2, 0x3]) }),
         ];
         let expected_buf = buf.clone();        

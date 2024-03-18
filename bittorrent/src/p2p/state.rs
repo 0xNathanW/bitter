@@ -1,6 +1,5 @@
 use crate::stats::ThroughputStats;
 
-
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum ConnState {
     Connecting,
@@ -56,6 +55,7 @@ impl SessionState {
         self.throughput.reset();
     }
 
+    #[inline(always)]
     pub fn update(&mut self, f: impl FnOnce(&mut SessionState)) {
         f(self);
         self.changed = true;

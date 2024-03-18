@@ -1,4 +1,4 @@
-use std::{io::{Seek, Write}, ops::Range, sync};
+use std::{io::{Read, Seek, Write}, sync::Arc};
 use sha1::{Sha1, Digest};
 use crate::{block::Block, BLOCK_SIZE};
 use super::{torrent::TorrentFile, Result};
@@ -10,7 +10,7 @@ pub struct Piece {
     pub hash: [u8; 20],
 
     // Length of piece in bytes.
-    pub length: usize,
+    pub len: usize,
 
     // Piece data.
     pub data: Vec<u8>,
@@ -22,7 +22,7 @@ pub struct Piece {
     pub num_blocks_received: u32,
 
     // Range of file indices that the piece overlaps.
-    pub file_overlap: Range<usize>,
+    pub file_overlap: std::ops::Range<usize>,
 }
 
 impl Piece {
@@ -38,6 +38,10 @@ impl Piece {
         }
     }
 
+    pub fn is_complete(&self) -> bool {
+        self.num_blocks_received == self.blocks_received.len() as u32
+    }
+
     // Hash the piece data and compare with hash given in metainfo.
     pub fn verify_hash(&self) -> bool {
         let mut hasher = Sha1::new();
@@ -46,31 +50,62 @@ impl Piece {
         hash.as_slice() == self.hash
     }
 
-    // Write the piece data to the files.
-    pub fn write(&self, piece_offset: usize, files: &[sync::RwLock<TorrentFile>]) -> Result<()> {
+    pub fn write(&self, piece_offset: usize, files: &[TorrentFile]) -> Result<()> {
         
         let mut total_offset = piece_offset;
         let mut bytes_written = 0;
         
         let files = &files[self.file_overlap.clone()];
         for file in files {
-            let mut f = file.write().unwrap();
+            let mut f = file.file_lock.write().unwrap();
             
-            let byte_range = f.info.byte_range();
+            let byte_range = file.byte_range();
             let file_offset = total_offset - byte_range.start;
-            let piece_remaining = self.length - bytes_written;
+            let piece_remaining = self.len - bytes_written;
             let file_remaining = byte_range.end - total_offset;
             let bytes_remaining = std::cmp::min(piece_remaining, file_remaining);
             
             // seek to the correct position in the file
             // TODO: do we only have to seek on the first file?
-            f.handle.seek(std::io::SeekFrom::Start(file_offset as u64)).unwrap();
-            let n = f.handle.write(&self.data[bytes_written..bytes_written + bytes_remaining]).unwrap();
+            f.seek(std::io::SeekFrom::Start(file_offset as u64)).unwrap();
+            let n = f.write(&self.data[bytes_written..bytes_written + bytes_remaining]).unwrap();
             
             total_offset += n;
             bytes_written += n;
         }
-        debug_assert_eq!(bytes_written, self.length, "not all bytes written to disk");
+        debug_assert_eq!(bytes_written, self.len, "not all bytes written to disk");
         Ok(())
     }
+}
+
+// Reads n contiguous bytes from files.
+pub fn read_piece(
+    offset: usize,
+    len: usize,
+    files: &[TorrentFile],
+) -> Vec<Arc<Vec<u8>>> {
+    
+    let mut bytes_read = 0;
+    let mut total_offset = offset;
+    let mut buf = vec![0; len];
+
+    for file in files.iter() {
+        let mut f = file.file_lock.write().unwrap();
+        let byte_range = file.byte_range();
+        let file_offset = total_offset - byte_range.start;
+        let piece_remaining = len - bytes_read;
+        let file_remaining = byte_range.end - total_offset;
+        let bytes_remaining = std::cmp::min(piece_remaining, file_remaining);
+
+        f.seek(std::io::SeekFrom::Start(file_offset as u64)).unwrap();
+        let n = f.read(&mut buf[bytes_read..bytes_read + bytes_remaining]).unwrap();
+
+        bytes_read += n;
+        total_offset += n;
+    }
+    debug_assert_eq!(bytes_read, len);
+    
+    buf.chunks(BLOCK_SIZE as usize)
+        .map(|chunk| Arc::new(chunk.to_vec()))
+        .collect()
 }

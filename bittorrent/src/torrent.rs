@@ -1,23 +1,19 @@
 use std::{
-    collections::HashMap, net::SocketAddr, sync::Arc, time::{Duration, Instant}
+    collections::HashMap, 
+    net::SocketAddr, 
+    sync::Arc, time::{Duration, Instant}
 };
 use tokio::{sync::mpsc, time};
 use crate::{
-    config::TorrentConfig, 
-    fs, 
-    metainfo::MetaInfo,
-    p2p::{state::{ConnState, SessionState}, PeerCommand, PeerHandle, PeerSession},
-    picker::Picker,
-    stats::{PeerStats, PieceStats, ThroughputStats, TorrentStats},
-    store::StoreInfo,
-    tracker::{AnnounceParams, Event, Tracker, TrackerError},
-    CommandToUser,
-    TorrentID,
-    UserTx,
+    config::Config, disk::{AllocationError, DiskTx}, p2p::{state::{ConnState, SessionState},
+    PeerCommand, PeerHandle, PeerSession}, picker::Picker, stats::{PeerStats, PieceStats, ThroughputStats, TorrentStats, TrackerStats}, store::TorrentInfo, tracker::{AnnounceParams, Event, Tracker, TrackerError}, Bitfield, TorrentID, UserCommand, UserTx
 };
 
 #[derive(Debug, thiserror::Error)]
 pub enum TorrentError {
+
+    #[error(transparent)]
+    AllocationError(#[from] AllocationError),
 
     #[error("tracker error: {0}")]
     TrackerError(#[from] TrackerError),
@@ -27,6 +23,7 @@ pub enum TorrentError {
 
     #[error("channel error: {0}")]
     ChannelError(String),
+
 }
 
 impl<T> From<mpsc::error::SendError<T>> for TorrentError {
@@ -35,10 +32,10 @@ impl<T> From<mpsc::error::SendError<T>> for TorrentError {
     }
 }
 
-pub enum CommandToTorrent {
+pub enum TorrentCommand {
     
-    // Sent by peer task when peer successfully connects.
-    PeerConnected { address: SocketAddr, id: [u8; 20] },
+    // Sent by client after disk allocation.
+    Bitfield(Bitfield),
     
     // Sent by disk task when piece written.
     PieceWritten { idx: usize, valid: bool },
@@ -50,10 +47,21 @@ pub enum CommandToTorrent {
     
 }
 
+#[derive(Debug, Default, Copy, Clone)]
+pub enum TorrentState {
+    #[default]
+    Checking,
+    Announcing,
+    Downloading,
+    Seeding,
+    Stopped,
+    Paused,
+}
+
 // Type aliases.
 pub type Result<T> = std::result::Result<T, TorrentError>;
-pub type TorrentTx = mpsc::UnboundedSender<CommandToTorrent>;
-pub type TorrentRx = mpsc::UnboundedReceiver<CommandToTorrent>;
+pub type TorrentTx = mpsc::UnboundedSender<TorrentCommand>;
+pub type TorrentRx = mpsc::UnboundedReceiver<TorrentCommand>;
 
 #[derive(Debug)]
 pub struct Torrent {
@@ -72,8 +80,6 @@ pub struct Torrent {
 
     torrent_rx: TorrentRx,
 
-    torrent_tx: TorrentTx,
-
     user_tx: UserTx,
 
     start_time: Option<Instant>,
@@ -82,7 +88,9 @@ pub struct Torrent {
 
     throughput: ThroughputStats,
 
-    config: TorrentConfig,
+    state: TorrentState,
+
+    config: Config,
 
 }
 
@@ -105,10 +113,10 @@ pub struct TorrentContext {
     pub torrent_tx: TorrentTx,
     
     // // Commands to disk.
-    pub disk_tx: fs::DiskTx,
+    pub disk_tx: DiskTx,
 
     // Torrent storage information.
-    pub info: StoreInfo,
+    pub info: TorrentInfo,
 
 }
 
@@ -116,15 +124,19 @@ pub struct TorrentParams {
 
     pub id: TorrentID,
 
+    pub info: TorrentInfo,
+
+    pub info_hash: [u8; 20],
+
     pub client_id: [u8; 20],
 
-    pub metainfo: MetaInfo,
+    pub trackers: Vec<Vec<Tracker>>,
 
     pub user_tx: UserTx,
 
-    pub disk_tx: fs::DiskTx,
+    pub disk_tx: DiskTx,
 
-    pub config: TorrentConfig,
+    pub config: Config,
 
 }
 
@@ -133,10 +145,9 @@ impl Torrent {
     // This probably shouldnt be async, it is at the moment because Disk::new() is.
     pub fn new(params: TorrentParams) -> (Self, TorrentTx) {        
         
-        let info = StoreInfo::new(&params.metainfo, params.config.output_dir.clone());
-        let num_pieces = info.num_pieces;
-        let piece_len = info.piece_len;
-        let last_piece_len = info.last_piece_len;
+        let num_pieces = params.info.num_pieces;
+        let piece_len = params.info.piece_len;
+        let last_piece_len = params.info.last_piece_len;
         let (torrent_tx, torrent_rx) = mpsc::unbounded_channel();
         
         (
@@ -144,7 +155,7 @@ impl Torrent {
                 ctx: Arc::new(
                     TorrentContext {
                         id: params.id,
-                        info_hash: params.metainfo.info_hash(),
+                        info_hash: params.info_hash,
                         client_id: params.client_id,
                         picker: Picker::new(
                             num_pieces, 
@@ -152,19 +163,19 @@ impl Torrent {
                             last_piece_len,
                         ),
                         torrent_tx: torrent_tx.clone(),
-                        info,
+                        info: params.info,
                         disk_tx: params.disk_tx,
                     }
                 ),
-                trackers: params.metainfo.trackers(),
+                trackers: params.trackers,
                 peers: HashMap::new(),
                 available: Vec::new(),
                 user_tx: params.user_tx,
                 torrent_rx,
-                torrent_tx: torrent_tx.clone(),
                 start_time: None,
                 run_duration: Duration::default(),
                 throughput: ThroughputStats::default(),
+                state: TorrentState::Checking,
                 config: params.config,
             },
             torrent_tx
@@ -174,12 +185,21 @@ impl Torrent {
     // Do something with blocks in request queue if there is an error on run.
     pub async fn start(&mut self) -> Result<()> {
         tracing::info!("starting torrent");
+
+        // Wait for disk allocation result, set own bitfield to pieces we already have.
+        match self.torrent_rx.recv().await.ok_or(TorrentError::ChannelError("torrent dropped".to_string()))? {
+            TorrentCommand::Bitfield(bitfield) => {
+                tracing::info!("own bitfield has {}/{} pieces", bitfield.count_ones(), self.ctx.info.num_pieces);
+                self.ctx.picker.piece_picker.write().await.set_own_bitfield(bitfield);
+            },
+            TorrentCommand::Shutdown => return Ok(()),
+            _ => unreachable!("unexpected command"),
+        }
+
         self.start_time = Some(Instant::now());
         // Send user msg if there is error.
-        self.run().await.map_err(|e| {
-            self.user_tx.send(CommandToUser::TorrentError(e.to_string())).ok();
-            e
-        })?;
+        self.run().await?;
+
         Ok(())
     }
 
@@ -187,6 +207,7 @@ impl Torrent {
     // TODO: maybe put announces on a seperate task.
     #[tracing::instrument(skip(self, time), fields(num_peers = self.peers.len() + self.available.len()))]
     async fn announce(&mut self, event: Option<Event>, time: Instant) -> Result<()> {
+        self.state = TorrentState::Announcing;
 
         // Use trackers in order of tiers/priority.
         for tier in self.trackers.iter_mut() {
@@ -208,14 +229,25 @@ impl Torrent {
                 // If event OR we need peers and we can announce OR we can have more peers and should announce, then announce.
                 if event.is_some() || (num_peers_essential > Some(0) && tracker.can_announce(time)) || tracker.should_announce(time) {
                     
+                    let left = self.ctx.info.total_len - 
+                        (
+                            self.ctx.picker.piece_picker
+                                .read()
+                                .await
+                                .own_bitfield()
+                                .iter_ones()
+                                .fold(0, |acc, idx| acc + self.ctx.info.piece_len(idx)) 
+                                as u64
+                        );
+                    tracing::debug!("left calculated: {}", left);
+                    
                     let params = AnnounceParams {
                         info_hash: self.ctx.info_hash,
                         peer_id: self.ctx.client_id,
                         port: self.config.listen_address.port() as u16,
-                        // TODO change all with relation to stats.
-                        uploaded: 0,
-                        downloaded: 0,
-                        left: self.ctx.info.total_len,
+                        uploaded: self.throughput.up.total(),
+                        downloaded: self.throughput.down.total(),
+                        left,
                         event,
                         num_want: num_peers_essential,
                         tracker_id: tracker.tracker_id.clone(),
@@ -226,6 +258,15 @@ impl Torrent {
                     // tracker.last_announce = Some(time);
                     match tracker.send_announce(params).await {
                         Ok(peers) => {
+                            self.user_tx.send(
+                                UserCommand::TrackerStats {
+                                    id: self.ctx.id,
+                                    stats: TrackerStats {
+                                        url: tracker.url.clone(),
+                                        num_peers: peers.len(),
+                                    },
+                                }
+                            )?;
                             self.available.extend(peers.into_iter());
                             tracker.last_announce = Some(time);
                         },
@@ -261,7 +302,7 @@ impl Torrent {
     async fn run(&mut self) -> Result<()> {
         let mut ticker = time::interval(time::Duration::from_secs(1));
         let mut last_tick = None;
-        
+
         // Initial announce.
         self.announce(Some(Event::Started), Instant::now()).await?;
 
@@ -271,6 +312,12 @@ impl Torrent {
 
         self.connect_to_peers();
         
+        self.state = if self.ctx.picker.piece_picker.read().await.own_bitfield().count_ones() == self.ctx.info.num_pieces as usize {
+            TorrentState::Seeding
+        } else {
+            TorrentState::Downloading
+        };
+
         // Top level torrent loop.
         loop { tokio::select! {
 
@@ -291,21 +338,22 @@ impl Torrent {
             Some(cmd) = self.torrent_rx.recv() => {
                 match cmd {
 
-                    CommandToTorrent::PeerConnected { address, id } => {
-                        if let Some(peer) = self.peers.get_mut(&address) {
-                            peer.id = Some(id);
-                        }
-                    },
+                    // From Client.
+                    TorrentCommand::Bitfield(bitfield) => {
+                        self.ctx.picker.piece_picker.write().await.set_own_bitfield(bitfield);
+                    }
 
-                    CommandToTorrent::PeerState { address, state } => {
+                    // From peers.
+                    TorrentCommand::PeerState { address, state } => {
                         self.handle_peer_state(address, state);
                     }
 
-                    CommandToTorrent::PieceWritten { idx, valid } => {
+                    // From disk.
+                    TorrentCommand::PieceWritten { idx, valid } => {
                         self.handle_piece_write(idx, valid).await?;
                     },
 
-                    CommandToTorrent::Shutdown => {
+                    TorrentCommand::Shutdown => {
                         break;
                     },
                 }
@@ -330,16 +378,17 @@ impl Torrent {
                 .take()
                 .expect("missing handle")
                 .await
-                .expect("peer task err")
             {
                 tracing::warn!("session shutdown: {}", e);
             }
         }
         
-        // Announce stopped event to trackers.
-        self.announce(Some(Event::Stopped), Instant::now()).await?;
-        self.user_tx.send(crate::CommandToUser::TorrentComplete(self.ctx.id))?;
-        self.torrent_tx.send(CommandToTorrent::Shutdown)?;
+        // Announce completed event to trackers.
+        self.announce(Some(Event::Completed), Instant::now()).await?;
+        self.user_tx.send(crate::UserCommand::TorrentResult {
+            id: self.ctx.id,
+            result: Ok(()),
+        })?;
         Ok(())
     }
 
@@ -400,7 +449,7 @@ impl Torrent {
         *last_tick = Some(time);
 
         let stats = self.build_stats().await;
-        self.user_tx.send(CommandToUser::TorrentStats {
+        self.user_tx.send(UserCommand::TorrentStats {
             id: self.ctx.id,
             stats,
         })?;
@@ -433,6 +482,7 @@ impl Torrent {
                 num_pending,
                 num_downloaded,                
             },
+            state: self.state,
             throughput: self.throughput,
             peer_stats,
         }

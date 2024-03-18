@@ -1,5 +1,5 @@
-use tokio::sync::mpsc;
-use crate::{block::Block, stats::ThroughputStats};
+use tokio::{sync::mpsc, task::JoinHandle};
+use crate::block::Block;
 
 mod session;
 mod message;
@@ -7,12 +7,11 @@ mod handshake;
 pub mod state;
 
 pub use session::PeerSession;
+use state::SessionState;
 
-use self::state::SessionState;
-
-type Result<T, E = PeerError> = std::result::Result<T, E>;
+type Result<T> = std::result::Result<T, PeerError>;
+type PeerRx = mpsc::UnboundedReceiver<PeerCommand>;
 pub type PeerTx = mpsc::UnboundedSender<PeerCommand>;
-pub type PeerRx = mpsc::UnboundedReceiver<PeerCommand>;
 
 #[derive(thiserror::Error, Debug)]
 pub enum PeerError {
@@ -41,9 +40,6 @@ pub enum PeerError {
     #[error("invalid message payload")]
     InvalidMessage,
 
-    #[error("no message recieved")]
-    NoMessage,
-
     #[error("connection timeout")]
     Timeout,
 }
@@ -71,37 +67,37 @@ pub enum PeerCommand {
 #[derive(Debug)]
 pub struct PeerHandle {
 
-    // Unique 20-byte id for peer.
-    pub id: Option<[u8; 20]>,
-
     // Sends commands to the torrent.
     pub peer_tx: Option<PeerTx>,
 
+    // Tracks the state of the peer session.
     pub state: SessionState,
 
     // Handle to the peer session.
-    pub session_handle: Option<tokio::task::JoinHandle<Result<()>>>,
+    pub session_handle: Option<JoinHandle<Result<()>>>,
     
 }
 
 impl PeerHandle {
 
-    fn new(peer_tx: PeerTx, handle: tokio::task::JoinHandle<Result<()>>) -> PeerHandle {
+    fn new(peer_tx: PeerTx, handle: JoinHandle<Result<()>>) -> PeerHandle {
         PeerHandle {
-            id: None,
+            // id: None,
             peer_tx: Some(peer_tx),
             session_handle: Some(handle),
             state: SessionState::default(),
         }
     }
-
+    
     pub fn start_session(
         mut session: PeerSession,
         peer_tx: PeerTx,
         socket: Option<tokio::net::TcpStream>
     ) -> PeerHandle {
         let handle = tokio::spawn(async move {
-            session.start_session(socket).await
+            session.start_session(socket)
+                .await
+                .map_err(|e| {tracing::error!("peer session error: {}", e); e})
         });
         PeerHandle::new(peer_tx, handle)
     }
