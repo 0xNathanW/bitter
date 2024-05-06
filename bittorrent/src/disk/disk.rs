@@ -51,15 +51,11 @@ impl Disk {
                             res: Err(AllocationError::DuplicateTorrent),
                         }
                     } else {
-                        let num_pieces = info.num_pieces;
                         match torrent::Torrent::new(files, dir, piece_hashes, info, torrent_tx) {
                             Ok(torrent) => {
                                 // Allocate the new torrent.
                                 // Maybe run this in a separate task?
-                                let bf = torrent.check_existing_files().unwrap_or_else(|e| {
-                                    tracing::error!("error checking existing files: {}", e);
-                                    Bitfield::repeat(false, num_pieces as usize)
-                                });
+                                let bf = torrent.check_existing_files();
                                 self.torrents.insert(id, RwLock::new(torrent));
                                 ClientCommand::TorrentAllocation { id, res: Ok(bf)}
                             },

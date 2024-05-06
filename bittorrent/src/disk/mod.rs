@@ -12,14 +12,20 @@ use crate::{
 mod piece;
 mod disk;
 mod torrent;
-// #[cfg(test)]
-// mod tests;
+#[cfg(test)]
+mod tests;
 
 #[derive(thiserror::Error, Debug)]
 pub enum DiskError {
 
     #[error(transparent)]
     IoError(#[from] std::io::Error),
+
+    #[error("io error: expected {expected} bytes, got {actual}")]
+    IoSizeError {
+        expected: usize,
+        actual: usize,
+    },
 
     // Usually relating to poisoned file locks.
     #[error("sync error: {0}")]

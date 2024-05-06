@@ -1,3 +1,4 @@
+use core::panic;
 use std::{io::{Read, Seek, Write}, sync::Arc};
 use sha1::{Sha1, Digest};
 use crate::{block::Block, BLOCK_SIZE};
@@ -57,7 +58,7 @@ impl Piece {
         
         let files = &files[self.file_overlap.clone()];
         for file in files {
-            let mut f = file.file_lock.write().unwrap();
+            let mut f = file.file_lock.write()?;
             
             let byte_range = file.byte_range();
             let file_offset = total_offset - byte_range.start;
@@ -67,13 +68,20 @@ impl Piece {
             
             // seek to the correct position in the file
             // TODO: do we only have to seek on the first file?
-            f.seek(std::io::SeekFrom::Start(file_offset as u64)).unwrap();
-            let n = f.write(&self.data[bytes_written..bytes_written + bytes_remaining]).unwrap();
+            f.seek(std::io::SeekFrom::Start(file_offset as u64))?;
+            let n = f.write(&self.data[bytes_written..bytes_written + bytes_remaining])?;
             
             total_offset += n;
             bytes_written += n;
         }
-        debug_assert_eq!(bytes_written, self.len, "not all bytes written to disk");
+        
+        if bytes_written != self.len {
+            return Err(super::DiskError::IoSizeError {
+                expected: self.len,
+                actual: bytes_written,
+            });
+        }
+
         Ok(())
     }
 }
@@ -83,29 +91,41 @@ pub fn read_piece(
     offset: usize,
     len: usize,
     files: &[TorrentFile],
-) -> Vec<Arc<Vec<u8>>> {
+) -> Result<Vec<Arc<Vec<u8>>>> {
     
-    let mut bytes_read = 0;
+    let mut bytes_read: usize = 0;
     let mut total_offset = offset;
     let mut buf = vec![0; len];
 
     for file in files.iter() {
-        let mut f = file.file_lock.write().unwrap();
+        let mut f = file.file_lock.write()?;
         let byte_range = file.byte_range();
-        let file_offset = total_offset - byte_range.start;
+
+        let file_offset = total_offset.checked_sub(byte_range.start).ok_or(super::DiskError::IoSizeError {
+            expected: byte_range.start,
+            actual: total_offset,
+        })?;
+        
         let piece_remaining = len - bytes_read;
         let file_remaining = byte_range.end - total_offset;
         let bytes_remaining = std::cmp::min(piece_remaining, file_remaining);
 
-        f.seek(std::io::SeekFrom::Start(file_offset as u64)).unwrap();
-        let n = f.read(&mut buf[bytes_read..bytes_read + bytes_remaining]).unwrap();
+        // TODO: can this be skipped after first file (idx = 0)?.
+        f.seek(std::io::SeekFrom::Start(file_offset as u64))?;
+        let n = f.read(&mut buf[bytes_read..bytes_read + bytes_remaining])?;
 
         bytes_read += n;
         total_offset += n;
     }
-    debug_assert_eq!(bytes_read, len);
     
-    buf.chunks(BLOCK_SIZE as usize)
+    if bytes_read != len {
+        return Err(super::DiskError::IoSizeError {
+            expected: len,
+            actual: bytes_read,
+        });
+    }
+    
+    Ok(buf.chunks(BLOCK_SIZE as usize)
         .map(|chunk| Arc::new(chunk.to_vec()))
-        .collect()
+        .collect())
 }

@@ -1,6 +1,7 @@
 # Notes
 
 IMMEDIATE TASK:
+    - Get write tests working.
     - Send tracker info.
     - Setup seeder/leecher tests.
     - on pause, disconnect from peers, however, cache information eg. bitfield, before doing so.

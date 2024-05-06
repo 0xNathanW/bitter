@@ -461,7 +461,6 @@ impl PeerSession {
             })?;
         }
         self.state.tick();
-        tracing::debug!("{:#?}", self.state);
 
         Ok(())  
     }

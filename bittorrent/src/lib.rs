@@ -54,6 +54,7 @@ pub use torrent::{TorrentError, TorrentState};
 pub fn start_client(config: Option<Config>) -> (ClientHandle, UserRx) {
     let (user_tx, user_rx) = mpsc::unbounded_channel();
     let (mut client, client_tx) = client::Client::new(config.unwrap_or_default(), user_tx);
+    tracing::info!("starting client");
     let handle = tokio::spawn(async move { client.run().await });
     (ClientHandle::new(client_tx, handle), user_rx)
 }

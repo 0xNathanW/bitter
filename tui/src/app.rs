@@ -74,7 +74,7 @@ impl App {
                         UserCommand::TorrentResult { id, result } => {
                             let _idx = self.torrent_lookup
                                 .get(&id)
-                                .ok_or(color_eyre::eyre::anyhow!("torrent not found"))?;
+                                .ok_or(color_eyre::eyre::anyhow!("torrent not found (result)"))?;
                             match result {
                                 Ok(_) => {},
                                 Err(e) => {},
@@ -84,14 +84,14 @@ impl App {
                         UserCommand::TorrentStats { id, stats } => {
                             let idx = self.torrent_lookup
                                 .get(&id)
-                                .ok_or(color_eyre::eyre::anyhow!("torrent not found"))?;
+                                .ok_or(color_eyre::eyre::anyhow!("torrent not found (stats torrent)"))?;
                             self.torrents[*idx].update_torrent_stats(stats);
                         },
                         
                         UserCommand::TrackerStats { id, stats } => {
                             let idx = self.torrent_lookup
                                 .get(&id)
-                                .ok_or(color_eyre::eyre::anyhow!("torrent not found"))?;
+                                .ok_or(color_eyre::eyre::anyhow!("torrent not found (stats tracker)"))?;
                             self.torrents[*idx].update_tracker_stats(stats);
                         },
                     }

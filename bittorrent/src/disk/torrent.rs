@@ -99,7 +99,7 @@ impl Torrent {
             // Create sub-directories if they don't exist.
             // TODO: handle more than one layer of subdirectories.
             if let Some(subdir) = path.parent() {
-                if !subdir.exists() {
+                if !subdir.exists() && subdir != PathBuf::from("") {
                     tracing::info!("creating sub-directory: {:?}", subdir);
                     std::fs::create_dir_all(&subdir)?;
                 }
@@ -119,7 +119,7 @@ impl Torrent {
                         md5sum: file.md5sum,
                     }
             );
-            tracing::info!("created file: {:?}", &path);
+            tracing::info!("created file: {:?}", &dir.join(&path));
             offset += len;
         }
 
@@ -136,8 +136,6 @@ impl Torrent {
             })
         })
     }
-    
-    
 
     pub fn write_block(&mut self, block: Block) {
         // Block info is validated in the peer session.
@@ -210,8 +208,8 @@ impl Torrent {
 
             // TODO: IDK if this is right?
             let _: JoinHandle<Result<()>> = tokio::task::spawn_blocking(move || {
-
-                let piece = read_piece(offset, len, &ctx.files[file_range]);
+                // TODO: Do we want to handle error, continuing task?
+                let piece = read_piece(offset, len, &ctx.files[file_range])?;
                 let block = Arc::clone(&piece[block_idx]);
 
                 ctx.read_cache.lock()?.put(block_info.piece_idx, piece);
@@ -227,46 +225,33 @@ impl Torrent {
     }
 
     // Checks if the files exist, if so returns a bitfield of correctly occuring pieces.
-    pub fn check_existing_files(&self) -> Result<Bitfield> {
+    pub fn check_existing_files(&self) -> Bitfield {
 
-        tracing::info!("checking existing files");
         let mut bitfield = Bitfield::repeat(false, self.info.num_pieces as usize);
-        let mut total_offset = 0_usize;
-        for file in &self.ctx.files {
-            let lock = file.file_lock.read()?;
-            let file_len = lock.metadata()?.len() as usize;
-            if file_len == 0 {
-                continue;
-            }
-            tracing::info!("file len: {}", file_len);
-            tracing::info!("file len_real: {}", file.len);
-            drop(lock);
-            let byte_range = file.byte_range();
-            let start_piece = byte_range.start / self.info.piece_len;
-            let end_piece = (byte_range.end.min(total_offset + file_len) / self.info.piece_len) + 1;
-            // TODO: this is like one piece off sometimes.
-            for piece_idx in start_piece..(end_piece - 1) {
-                let file_range = piece_file_intersections(&self.info, &self.ctx.files, piece_idx);
-                tracing::info!("offset {}", piece_idx * self.info.piece_len);
-                let piece = read_piece(
-                    piece_idx * self.info.piece_len,
-                    self.info.piece_len(piece_idx),
-                    &self.ctx.files[file_range],
-                );
-                let mut hasher = sha1::Sha1::new();
-                for block in piece.iter() {
-                    hasher.update(&**block);
-                }
-                let hash = hasher.finalize();
-                if hash.as_slice() == self.piece_hashes[piece_idx] {
-                    tracing::trace!("have piece {}", piece_idx);
-                    bitfield.set(piece_idx, true);
-                }
-            }
-            total_offset += file.len;
-        }    
         
-        Ok(bitfield)
+        // Iterate over all pieces and check hash matches.
+        for piece_idx in 0..self.info.num_pieces as usize {
+            let file_range = piece_file_intersections(&self.info, &self.ctx.files, piece_idx);
+            match read_piece(
+                piece_idx * self.info.piece_len,
+                self.info.piece_len(piece_idx),
+                &self.ctx.files[file_range],
+            ) {
+                Ok(piece) => {
+                    let mut hasher = sha1::Sha1::new();
+                    for block in piece.iter() {
+                        hasher.update(&**block);
+                    }
+                    let hash = hasher.finalize();
+                    if hash.as_slice() == self.piece_hashes[piece_idx] {
+                        bitfield.set(piece_idx, true);
+                    }
+                },
+                Err(_) => continue,
+            }
+        }
+
+        bitfield
     }
 }
 

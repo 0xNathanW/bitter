@@ -1,17 +1,24 @@
 use std::collections::HashMap;
 use tokio::{sync::mpsc, task::JoinHandle};
 use crate::{
-    config::Config, disk::{self, AllocationError, DiskCommand, DiskError, DiskTx}, metainfo::MetaInfo, store::TorrentInfo, torrent::{self, Torrent, TorrentParams, TorrentTx}, Bitfield, TorrentID, UserCommand, UserTx
+    config::Config, 
+    disk::{self, AllocationError, DiskCommand, DiskError, DiskTx}, 
+    metainfo::MetaInfo, 
+    store::TorrentInfo, 
+    torrent::{self, Torrent, TorrentParams, TorrentTx}, 
+    Bitfield, 
+    TorrentID, 
+    UserCommand, 
+    UserTx
 };
 
-// What can go wrong when using the client.
 #[derive(thiserror::Error, Debug)]
 pub enum ClientError {
     
         #[error(transparent)]
         DiskError(#[from] DiskError),
     
-        #[error("channel error: {0}")]
+        #[error("client channel error: {0}")]
         ChannelError(String),
 
 }
@@ -41,6 +48,7 @@ pub type Result<T> = std::result::Result<T, ClientError>;
 pub type ClientRx = mpsc::UnboundedReceiver<ClientCommand>;
 pub type ClientTx = mpsc::UnboundedSender<ClientCommand>;
 
+// Handle returned to the user to interact with the client.
 pub struct ClientHandle {
 
     client_tx: ClientTx,
@@ -60,6 +68,8 @@ impl ClientHandle {
         self.client_tx.send(ClientCommand::NewTorrent(metainfo))?;
         Ok(())
     }
+
+    // TODO: pause, resume, remove torrent.
 
     pub async fn shutdown(&mut self) -> Result<()> {
         self.client_tx.send(ClientCommand::Shutdown)?;
@@ -174,7 +184,14 @@ impl Client {
             disk_tx: self.disk_tx.clone(),
             user_tx: self.user_tx.clone(),
         });
-
+        
+        // If the torrent is multi file, create a directory for it.
+        let dir = if metainfo.is_multi_file() {
+            self.config.dir.join(metainfo.info.name.clone())
+        } else {
+            self.config.dir.clone()
+        };
+        
         // If the torrent is single file, create a single element vector. 
         let files = if let Some(files) = metainfo.info.files {
             files
@@ -192,7 +209,7 @@ impl Client {
             info,
             piece_hashes,
             files,
-            dir: self.config.dir.clone(),
+            dir,
             torrent_tx: torrent_tx.clone(),
         })?;
 

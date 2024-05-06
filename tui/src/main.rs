@@ -4,7 +4,7 @@ use tui::app::App;
 
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
-    // init_panic_hooks()?;
+    init_panic_hooks()?;
 
     let mut app = App::new()?;
     
@@ -12,7 +12,10 @@ async fn main() -> color_eyre::Result<()> {
     execute!(stdout(), EnterAlternateScreen)?;
     enable_raw_mode()?;
     
-    app.run().await?;
+    match app.run().await {
+        Ok(_) => {}
+        Err(e) => eprint!("{}", e),
+    }
 
     // Return control of the terminal.
     execute!(stdout(), LeaveAlternateScreen)?;
@@ -31,6 +34,7 @@ fn init_panic_hooks() -> color_eyre::Result<()> {
     std::panic::set_hook(Box::new(move |panic_info| {
         stdout().execute(LeaveAlternateScreen).unwrap();
         disable_raw_mode().unwrap();
+        println!("{:?}", panic_info);
         panic_hook(panic_info);
     }));
 
@@ -38,6 +42,7 @@ fn init_panic_hooks() -> color_eyre::Result<()> {
     color_eyre::eyre::set_hook(Box::new(move |error| {
         stdout().execute(LeaveAlternateScreen).unwrap();
         disable_raw_mode().unwrap();
+        println!("{:?}", error);
         eyre_hook(error)
     }))?;
 
