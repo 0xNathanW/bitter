@@ -18,6 +18,7 @@ const BLOCK_SIZE: usize = 0x4000;
 
 type Bitfield = bitvec::vec::BitVec<u8, bitvec::order::Msb0>;
 
+// 20 byte SHA1 info hash.
 pub type TorrentID = [u8; 20];
 
 // Messages the users of the client expect to recieve.
@@ -34,17 +35,12 @@ pub enum UserCommand {
         id: TorrentID,
         stats: stats::TorrentStats,
     },
-
-    // Sent whenever we recieve a tracker response. {
-    TrackerStats {
-        id: TorrentID,
-        stats: stats::TrackerStats,
-    }
 }
 
 type UserTx = mpsc::UnboundedSender<UserCommand>;
 pub type UserRx = mpsc::UnboundedReceiver<UserCommand>;
 
+// Re-exports
 pub use client::{Result, ClientHandle, ClientError};
 pub use p2p::state::{SessionState, ConnState};
 pub use config::Config;

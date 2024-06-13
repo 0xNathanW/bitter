@@ -1,11 +1,10 @@
-use std::{collections::HashSet, net::SocketAddr, sync::Arc};
+use std::{collections::HashSet, net::SocketAddr, sync::Arc, time::Instant};
 use tokio::{sync::mpsc, net::TcpStream, time};
 use tokio_util::codec::Framed;
 use futures::{SinkExt, StreamExt, stream::SplitSink};
 use crate::{
     block::{Block, BlockRequest},
     disk::DiskCommand,
-    picker::partial_piece::BlockState,
     torrent::{TorrentCommand, TorrentContext},
     Bitfield,
 };
@@ -85,6 +84,14 @@ impl PeerSession {
         self.run(socket).await
     }
 
+    pub async fn disconnect(&mut self) {
+        self.state.update(|state| *state = SessionState::default());
+        self.torrent_ctx.torrent_tx.send(TorrentCommand::PeerState {
+            address: self.address,
+            state: self.state,
+        }).ok();
+    }
+
     async fn exchange_handshake(&mut self, socket: &mut Framed<TcpStream, HandshakeCodec>, inbound: bool) -> Result<()> {
         
         self.state.update(|state| state.conn_state = ConnState::Handshaking);
@@ -124,6 +131,7 @@ impl PeerSession {
 
     async fn run(&mut self, socket: Framed<TcpStream, MessageCodec>) -> Result<()> {
 
+        self.state.connect_time = Some(Instant::now());
         self.state.update(|state| state.conn_state = ConnState::Introducing);
         let (mut sink, mut stream) = socket.split();
         let mut ticker = time::interval(time::Duration::from_secs(1));
@@ -151,7 +159,7 @@ impl PeerSession {
                 }
             }
 
-            _ = ticker.tick() => self.tick().await?,
+            t = ticker.tick() => self.tick(t.into_std()).await?,
 
         }}
 
@@ -450,8 +458,16 @@ impl PeerSession {
         Ok(())
     }
 
-    async fn tick(&mut self) -> Result<()> {
-        // TODO: Check for inactivity.
+    async fn tick(&mut self, time: Instant) -> Result<()> {
+    
+        if !self.state.interested 
+        && !self.state.peer_interested 
+        && time.saturating_duration_since(self.state.connect_time.unwrap())
+            >= time::Duration::from_secs(30)
+        {
+            tracing::warn!("disconnecting peer due to inactivity");
+            return Err(PeerError::Timeout)
+        }
 
         // Send stats if there is a state change.
         if self.state.changed {

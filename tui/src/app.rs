@@ -1,16 +1,16 @@
-use std::{collections::HashMap, io::{stdout, Stdout}};
+use std::{collections::HashMap, io::{stdout, Stdout}, time::Duration};
 use bittorrent::{ClientHandle, UserCommand, MetaInfo, TorrentID, UserRx};
-use crossterm::event::{self, Event};
-use ratatui::{backend::CrosstermBackend, layout::Layout, prelude::*, widgets::{self, Clear}, Frame};
+use crossterm::event::{self, poll, Event};
+use ratatui::{backend::CrosstermBackend, layout::Layout, prelude::*, widgets, Frame};
 use color_eyre::Result;
-use crate::{event::spawn_events, data::TorrentData, ui::{self, UiStates}};
+use crate::{data::TorrentData, ui};
 
 pub type Terminal = ratatui::Terminal<CrosstermBackend<Stdout>>;
 
 pub struct App {
     
     // Handle to the bittorrent client.
-    handle:   ClientHandle,
+    client:   ClientHandle,
     
     // Channel to recieve messages from the bittorrent client.
     user_rx:  UserRx,
@@ -21,8 +21,11 @@ pub struct App {
     // Maps torrent id to index in the torrents vector.
     torrent_lookup: HashMap<TorrentID, usize>,
 
-    // Ui stateful elements.
-    ui: UiStates,
+    file_explorer: ratatui_explorer::FileExplorer,
+
+    table_state: widgets::TableState,
+
+    scroll_state: widgets::ScrollbarState,
 
     // Index of the currently selected torrent.
     selected_idx: usize,
@@ -37,12 +40,20 @@ impl App {
     pub fn new() -> Result<Self> {
         // Run the bittorrent client in a separate task.
         let (handle, user_rx) = bittorrent::start_client(None);
+        let file_explorer = ratatui_explorer::FileExplorer::with_theme(
+            ratatui_explorer::Theme::default()
+                .add_default_title()
+                .with_title_bottom(|_| " 'q': quit | 'enter': select | 'esc': back ".into())
+        )?;
+        
         Ok(Self {
-            handle,
+            client: handle,
             user_rx,
             torrents: Vec::new(),
             torrent_lookup: HashMap::new(),
-            ui: UiStates::new()?,
+            file_explorer,
+            table_state: widgets::TableState::default().with_selected(0),
+            scroll_state: widgets::ScrollbarState::default(),
             selected_idx: 0,
             quit: false,
         })
@@ -51,7 +62,6 @@ impl App {
     pub async fn run(&mut self) -> Result<()> {
 
         let mut terminal = ratatui::Terminal::new(CrosstermBackend::new(stdout()))?;
-        let (event_handle, mut event_rx, sd_tx) = spawn_events();
 
         // Initially enter the file explorer, to let user pick file.
         // Also can't render the UI without a file to download.
@@ -65,6 +75,11 @@ impl App {
 
             terminal.draw(|f| self.view(f))?;
             
+            if poll(Duration::from_millis(100))? {
+                let event = event::read()?;
+                self.handle_event(event, &mut terminal)?;
+            }
+
             tokio::select! {
                 
                 // Some event from our bittorrent client
@@ -72,45 +87,43 @@ impl App {
                     match client_event {
                         
                         UserCommand::TorrentResult { id, result } => {
+                            log::info!("torrent result: {:?}", result);
                             let _idx = self.torrent_lookup
                                 .get(&id)
                                 .ok_or(color_eyre::eyre::anyhow!("torrent not found (result)"))?;
                             match result {
                                 Ok(_) => {},
-                                Err(e) => {},
+                                Err(e) => self.popup(&mut terminal, "error", "ERROR"),
                             }
                         },
                         
                         UserCommand::TorrentStats { id, stats } => {
-                            let idx = self.torrent_lookup
-                                .get(&id)
-                                .ok_or(color_eyre::eyre::anyhow!("torrent not found (stats torrent)"))?;
-                            self.torrents[*idx].update_torrent_stats(stats);
-                        },
-                        
-                        UserCommand::TrackerStats { id, stats } => {
-                            let idx = self.torrent_lookup
-                                .get(&id)
-                                .ok_or(color_eyre::eyre::anyhow!("torrent not found (stats tracker)"))?;
-                            self.torrents[*idx].update_tracker_stats(stats);
+                            log::info!("torrent stats: {:?}", id);
+                            match self.torrent_lookup.get(&id) {
+                                Some(idx) => self.torrents[*idx].update_torrent_stats(stats),
+                                None => {
+                                    log::error!("torrent not found (stats)");
+                                    return Err(color_eyre::eyre::anyhow!("torrent not found (stats)"));
+                                },
+                            }
                         },
                     }
                 },
-                
-                Some(event) = event_rx.recv() => self.handle_event(event, &mut terminal)?,
             }
 
             debug_assert!(self.selected_idx < self.torrents.len());
         }
 
-        sd_tx.send(()).ok();
-        event_handle.await?;
         Ok(())
     }
 
+    pub async fn shutdown(&mut self) {
+        self.client.shutdown().await.ok();
+    }
+
+    // Main rendering function.
     fn view(&mut self, f: &mut Frame) {
 
-        // ratatui Layout with 2 columns 2 rows equal size
         let rows = Layout::default()
             .direction(ratatui::layout::Direction::Vertical)
             .constraints(
@@ -121,17 +134,6 @@ impl App {
                 .as_ref(),
             )
             .split(f.size());
-
-        let top_row = Layout::default()
-            .direction(ratatui::layout::Direction::Horizontal)
-            .constraints(
-                [
-                    ratatui::layout::Constraint::Percentage(50),
-                    ratatui::layout::Constraint::Percentage(50),
-                ]
-                .as_ref(),
-            )
-            .split(rows[0]);
 
         let bottom_row = Layout::default()
             .direction(ratatui::layout::Direction::Horizontal)
@@ -145,16 +147,8 @@ impl App {
             .split(rows[1]);
 
 
-        // f.render_widget(self.torrent_table, top_row[0]);
-        self.ui.torrent_table.render(f, top_row[0], &self.torrents);
-        ui::render_torrent_panel(f, top_row[1], &self.torrents[self.selected_idx]);
-
-        // // Bottom row
-        // let bl = widgets::Paragraph::new("boo")
-        //     .block(widgets::Block::default().title("Bottom").borders(widgets::Borders::ALL));
-        // f.render_widget(bl, bottom_row[0]);
-        ui::render_tracker_table(f, bottom_row[0], &self.torrents[self.selected_idx]);
-
+        ui::render_torrent_table(f, rows[0], &mut self.table_state, &self.torrents);
+        ui::render_torrent_panel(f, bottom_row[0], &self.torrents[self.selected_idx]);
         ui::render_peer_table(f, bottom_row[1], &self.torrents[self.selected_idx]);
     }
 
@@ -168,9 +162,11 @@ impl App {
 
                 match key.code {
                     event::KeyCode::Char('q') => {
+                        log::info!("q pressed, quitting...");
                         self.quit = true;
                     },
                     event::KeyCode::Char('n') => {
+                        log::info!("n pressed, entering file explorer...");
                         self.enter_file_explorer(terminal)?;
                     },
                     event::KeyCode::Up => self.prev(),
@@ -187,7 +183,7 @@ impl App {
     }
 
     fn next(&mut self) {
-        let i = match self.ui.torrent_table.table_state.selected() {
+        let i = match self.table_state.selected() {
             Some(i) => {
                 if i >= self.torrents.len() - 1 {
                     0
@@ -201,7 +197,7 @@ impl App {
     }
 
     fn prev(&mut self) {
-        let i = match self.ui.torrent_table.table_state.selected() {
+        let i = match self.table_state.selected() {
             Some(i) => {
                 if i == 0 {
                     self.torrents.len() - 1
@@ -216,15 +212,15 @@ impl App {
 
     fn select(&mut self, idx: usize) {
         self.selected_idx = idx;
-        self.ui.torrent_table.table_state.select(Some(idx));
-        self.ui.torrent_table.scroll_state = self.ui.torrent_table.scroll_state.position(idx);
+        self.table_state.select(Some(idx));
+        self.scroll_state = self.scroll_state.position(idx);
     }
 
     fn enter_file_explorer(&mut self, terminal: &mut Terminal) -> Result<()> {
 
         loop {
             terminal.draw(|f| {
-                f.render_widget_ref(self.ui.file_explorer.widget(), f.size());
+                f.render_widget_ref(self.file_explorer.widget(), f.size());
             })?;
 
             if let Some(event) = event::read().ok() {
@@ -236,24 +232,29 @@ impl App {
                         match key.code {
                             
                             event::KeyCode::Char('q') => {
+                                log::info!("q pressed, quitting...");
                                 self.quit = true;
                                 return Ok(());
                             },
                             
                             event::KeyCode::Esc => {
+                                log::info!("esc pressed, exiting file explorer...");
                                 if self.torrents.len() > 0 {
+                                    return Ok(());
+                                } else {
+                                    self.quit = true;
                                     return Ok(());
                                 }
                             },
                             
                             event::KeyCode::Enter => {
-                                let file = self.ui.file_explorer.current();
+                                let file = self.file_explorer.current();
                                 if file.is_dir() {
-                                    self.ui.file_explorer.handle(&event)?;
+                                    self.file_explorer.handle(&event)?;
                                 } else {
                                     let metainfo = MetaInfo::new(file.path())?;
                                     // Sends the metainfo to the bittorrent client.
-                                    self.handle.new_torrent(metainfo.clone())?;
+                                    self.client.new_torrent(metainfo.clone())?;
                                     // Add the torrent to internal list.
                                     self.torrent_lookup.insert(metainfo.info_hash(), self.torrents.len());
                                     self.torrents.push(TorrentData::new(metainfo));
@@ -263,7 +264,7 @@ impl App {
                                 }
                             }
 
-                            _ => { self.ui.file_explorer.handle(&event)?; }
+                            _ => { self.file_explorer.handle(&event)?; }
                         
                         }
                     },
@@ -286,7 +287,7 @@ impl App {
                     .centered()
                     .block(block);
                 let area = centered_rect(60, 20, f.size());
-                f.render_widget(Clear, area);
+                f.render_widget(widgets::Clear, area);
                 f.render_widget(popup, area);
             }).unwrap();
 

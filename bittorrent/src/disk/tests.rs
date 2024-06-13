@@ -2,7 +2,14 @@ use std::{collections::HashMap, path::{Path, PathBuf}};
 use sha1::{Sha1, Digest};
 use tokio::sync::mpsc;
 use crate::{
-    block::*, client::ClientCommand, disk::{spawn_disk, DiskCommand}, p2p::PeerCommand, store::TorrentInfo, torrent::TorrentCommand, Bitfield, MetaInfo, BLOCK_SIZE
+    block::*, 
+    client::ClientCommand, 
+    disk::{spawn_disk, DiskCommand}, 
+    store::TorrentInfo, 
+    torrent::TorrentCommand, 
+    Bitfield, 
+    MetaInfo, 
+    BLOCK_SIZE
 };
 
 const TEST_TORRENT_FILE_PATH: &str = "tests/test_torrents/test_multi.torrent";
@@ -34,7 +41,6 @@ async fn test_disk_read() -> Result<(), Box<dyn std::error::Error>> {
             md5sum: metainfo.info.md5sum,
         }]
     };
-    
     
     let (client_tx, mut client_rx) = mpsc::unbounded_channel();
     let (torrent_tx, _) = mpsc::unbounded_channel();

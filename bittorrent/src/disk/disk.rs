@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use tokio::sync::{mpsc, RwLock};
-use crate::{client::{ClientTx, ClientCommand}, Bitfield, TorrentID};
+use crate::{client::{ClientTx, ClientCommand}, TorrentID};
 use super::*;
 
 pub struct Disk {
@@ -54,7 +54,7 @@ impl Disk {
                         match torrent::Torrent::new(files, dir, piece_hashes, info, torrent_tx) {
                             Ok(torrent) => {
                                 // Allocate the new torrent.
-                                // Maybe run this in a separate task?
+                                // Maybe run this in a separate task, particularly the checking?
                                 let bf = torrent.check_existing_files();
                                 self.torrents.insert(id, RwLock::new(torrent));
                                 ClientCommand::TorrentAllocation { id, res: Ok(bf)}

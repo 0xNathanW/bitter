@@ -1,25 +1,39 @@
-use std::io::stdout;
+use std::{fs::File, io::stdout};
 use crossterm::{execute, terminal::*, ExecutableCommand};
 use tui::app::App;
+use simplelog::*;
 
-#[tokio::main]
+
+#[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() -> color_eyre::Result<()> {
+
+    // Setup logging
+    // let log_file = File::create("tui.log")?;
+    // WriteLogger::init(LevelFilter::Info, Config::default(), log_file)?;
+    // console_subscriber::init();
+
     init_panic_hooks()?;
 
     let mut app = App::new()?;
     
     // Take control of the terminal.
+    log::info!("entering alternate screen mode.");
     execute!(stdout(), EnterAlternateScreen)?;
     enable_raw_mode()?;
-    
-    match app.run().await {
-        Ok(_) => {}
-        Err(e) => eprint!("{}", e),
-    }
+    log::info!("entered alternate screen mode.");
+
+    let r = app.run().await;
+    app.shutdown().await;
 
     // Return control of the terminal.
+    log::info!("leaving alternate screen mode.");
     execute!(stdout(), LeaveAlternateScreen)?;
     disable_raw_mode()?;
+    log::info!("left alternate screen mode.");
+
+    if let Err(e) = r {
+        log::error!("{:?}", e);
+    }
 
     Ok(())
 }

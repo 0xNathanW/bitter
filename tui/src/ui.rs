@@ -1,85 +1,48 @@
-use bittorrent::stats::TrackerStats;
 use ratatui::{widgets, prelude::*};
-use ratatui_explorer::{FileExplorer, Theme};
-use color_eyre::Result;
 use crate::data::TorrentData;
 
-pub struct UiStates {
 
-    pub torrent_table: TorrentTableState,
+// Renders the top left panel.
+pub fn render_torrent_table(
+    f: &mut ratatui::Frame, 
+    area: Rect, 
+    state: &mut widgets::TableState,
+    torrents: &Vec<TorrentData>
+) {
 
-    pub file_explorer: FileExplorer,
+    let block = widgets::Block::default()
+        .title(" Torrents ")
+        .borders(widgets::Borders::ALL);
+
+    let header = ["Name", "Size", "Status", "Progress", "Time"]
+        .iter()
+        .cloned()
+        .map(widgets::Cell::from)
+        .collect::<widgets::Row>()
+        .style(Style::new().underlined())
+        .height(1);
+
+    let rows = torrents
+        .iter()
+        .map(|torrent| {
+            torrent
+                .torrent_table_row_data()
+                .iter()
+                .cloned()
+                .map(|x| widgets::Cell::from(Text::from(x)))
+                .collect::<widgets::Row>()
+                .height(1)
+        });
+
+    let table = widgets::Table::new(rows, Constraint::from_percentages([20, 20, 20, 20, 20]))
+        .block(block)
+        .header(header)
+        .highlight_style(Style::default().add_modifier(ratatui::style::Modifier::REVERSED))
+        .highlight_spacing(widgets::HighlightSpacing::Always);
+
+    f.render_stateful_widget(table, area, state);
 }
 
-impl UiStates {
-    pub fn new() -> Result<Self> {
-        let file_explorer = FileExplorer::with_theme(
-            Theme::default()
-                .add_default_title()
-                .with_title_bottom(|_| " 'q': quit | 'enter': select | 'esc': back ".into())
-        )?;
-        
-        Ok(Self {
-            torrent_table: TorrentTableState::new(),
-            file_explorer,
-        })
-    }
-}
-
-pub struct TorrentTableState {
-    pub table_state: widgets::TableState,
-    pub scroll_state: widgets::ScrollbarState,
-}
-
-impl TorrentTableState {
-    pub fn new() -> Self {
-        Self {
-            table_state: widgets::TableState::default().with_selected(0),
-            scroll_state: widgets::ScrollbarState::default(),   
-        }
-    }
-
-    // Renders the top left panel.
-    pub fn render(
-        &mut self, 
-        f: &mut ratatui::Frame, 
-        area: Rect, 
-        torrents: &Vec<TorrentData>
-    ) {
-
-        let block = widgets::Block::default()
-            .title(" Torrents ")
-            .borders(widgets::Borders::ALL);
-
-        let header = ["Name", "Size", "Status", "Progress", "Time"]
-            .iter()
-            .cloned()
-            .map(widgets::Cell::from)
-            .collect::<widgets::Row>()
-            .style(Style::new().underlined())
-            .height(1);
-
-        let rows = torrents
-            .iter()
-            .map(|torrent| {
-                torrent
-                    .torrent_table_row_data()
-                    .iter()
-                    .cloned()
-                    .map(|x| widgets::Cell::from(Text::from(x)))
-                    .collect::<widgets::Row>()
-                    .height(1)
-            });
-
-        let table = widgets::Table::new(rows, Constraint::from_percentages([20, 20, 20, 20, 20]))
-            .block(block)
-            .header(header)
-            .highlight_style(Style::default().add_modifier(ratatui::style::Modifier::REVERSED))
-            .highlight_spacing(widgets::HighlightSpacing::Always);
-
-        f.render_stateful_widget(table, area, &mut self.table_state);
-    }
-}
 
 // Renders the top left panel.
 pub fn render_torrent_panel(f: &mut ratatui::Frame, area: Rect, data: &TorrentData) {
@@ -180,40 +143,4 @@ pub fn render_peer_table(f: &mut ratatui::Frame, area: Rect, data: &TorrentData)
         .highlight_spacing(widgets::HighlightSpacing::Always);
 
     f.render_widget(table, area);
-}
-
-pub fn render_tracker_table(f: &mut ratatui::Frame, area: Rect, data: &TorrentData) {
-
-    let block = widgets::Block::default()
-        .title(" Trackers ")
-        .borders(widgets::Borders::ALL);
-
-    let header = ["URL", "Num Peers"]
-        .iter()
-        .cloned()
-        .map(widgets::Cell::from)
-        .collect::<widgets::Row>()
-        .style(Style::new().underlined())
-        .height(1);
-
-    let tracker_row_data = data.tracker_table_row_data();
-    let rows = tracker_row_data
-        .iter()
-        .map(|tracker| {
-            tracker
-                .iter()
-                .cloned()
-                .map(|x| widgets::Cell::from(Text::from(x)))
-                .collect::<widgets::Row>()
-                .height(1)
-        });
-
-    let table = widgets::Table::new(rows, Constraint::from_percentages([50, 50]))
-        .block(block)
-        .header(header)
-        .highlight_style(Style::default().add_modifier(ratatui::style::Modifier::REVERSED))
-        .highlight_spacing(widgets::HighlightSpacing::Always);
-
-    f.render_widget(table, area);
-
 }

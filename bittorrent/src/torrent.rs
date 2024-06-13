@@ -9,7 +9,7 @@ use crate::{
     disk::{AllocationError, DiskTx}, 
     p2p::{state::{ConnState, SessionState}, PeerCommand, PeerHandle, PeerSession}, 
     picker::Picker, 
-    stats::{PeerStats, PieceStats, ThroughputStats, TorrentStats, TrackerStats}, 
+    stats::{PeerStats, PieceStats, ThroughputStats, TorrentStats}, 
     store::TorrentInfo, 
     tracker::{AnnounceParams, Event, Tracker, TrackerError}, 
     Bitfield, 
@@ -151,7 +151,6 @@ pub struct TorrentParams {
 
 impl Torrent {
 
-    // This probably shouldnt be async, it is at the moment because Disk::new() is.
     pub fn new(params: TorrentParams) -> (Self, TorrentTx) {        
         
         let num_pieces = params.info.num_pieces;
@@ -191,7 +190,7 @@ impl Torrent {
         )
     }
 
-    // Do something with blocks in request queue if there is an error on run.
+    // TODO: do something with blocks in request queue if there is an error on run.
     pub async fn start(&mut self) -> Result<()> {
         tracing::info!("starting torrent");
 
@@ -206,7 +205,7 @@ impl Torrent {
         }
 
         self.start_time = Some(Instant::now());
-        // Send user msg if there is error.
+        // TODO: Send user msg if there is error.
         self.run().await?;
 
         Ok(())
@@ -267,15 +266,6 @@ impl Torrent {
                     // tracker.last_announce = Some(time);
                     match tracker.send_announce(params).await {
                         Ok(peers) => {
-                            self.user_tx.send(
-                                UserCommand::TrackerStats {
-                                    id: self.ctx.id,
-                                    stats: TrackerStats {
-                                        url: tracker.url.clone(),
-                                        num_peers: peers.len(),
-                                    },
-                                }
-                            )?;
                             self.available.extend(peers.into_iter());
                             tracker.last_announce = Some(time);
                         },
@@ -309,12 +299,14 @@ impl Torrent {
 
     #[tracing::instrument(skip_all, name = "torrent")]
     async fn run(&mut self) -> Result<()> {
+
         let mut ticker = time::interval(time::Duration::from_secs(1));
         let mut last_tick = None;
 
         // Initial announce.
         self.announce(Some(Event::Started), Instant::now()).await?;
 
+        // Start listening for incoming connections.
         let listener = tokio::net::TcpListener::bind(&self.config.listen_address).await?;
         debug_assert_eq!(listener.local_addr()?, self.config.listen_address);
         tracing::info!("listening on {}", self.config.listen_address);
@@ -361,6 +353,7 @@ impl Torrent {
                     TorrentCommand::PieceWritten { idx, valid } => {
                         self.handle_piece_write(idx, valid).await?;
                     },
+
 
                     TorrentCommand::Shutdown => {
                         break;
@@ -481,6 +474,7 @@ impl Torrent {
                 num_pieces: peer.state.num_pieces,
                 throughput: peer.state.throughput,
             })
+            .filter(|peer| peer.state.conn_state != ConnState::Disconnected)
             .collect();
 
         TorrentStats {
@@ -489,7 +483,7 @@ impl Torrent {
             piece_stats: PieceStats {
                 num_pieces,
                 num_pending,
-                num_downloaded,                
+                num_downloaded,
             },
             state: self.state,
             throughput: self.throughput,

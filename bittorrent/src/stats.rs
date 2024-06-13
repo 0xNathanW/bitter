@@ -47,15 +47,6 @@ pub struct PeerStats {
 
 }
 
-#[derive(Debug, Clone)]
-pub struct TrackerStats {
-
-    pub url: url::Url,
-
-    pub num_peers: usize,
-
-}
-
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ThroughputStats {
 

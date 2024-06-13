@@ -1,4 +1,4 @@
-use bittorrent::{stats::{TorrentStats, TrackerStats}, ConnState, MetaInfo, TorrentState};
+use bittorrent::{stats::TorrentStats, ConnState, MetaInfo, TorrentState};
 
 // Information the user may want to know about a torrent.
 #[derive(Debug, Default)]
@@ -11,8 +11,7 @@ pub struct TorrentData {
     pub data: TorrentStats,
     pub history_up: Vec<u64>,
     pub history_down: Vec<u64>,
-
-    pub trackers: Vec<TrackerStats>,
+    
 }
 
 impl TorrentData {
@@ -35,16 +34,6 @@ impl TorrentData {
         self.data = stats;
     }
 
-    // TODO: fix.
-    pub fn update_tracker_stats(&mut self, stats: TrackerStats) {
-        match self.trackers
-            .iter_mut()
-            .find(|t| t.url == stats.url) {
-                Some(tracker) => *tracker = stats,
-                None => self.trackers.push(stats),
-            }            
-    }
-
     pub fn torrent_table_row_data(&self) -> [String; 5] {
         [
             self.name.clone(),
@@ -60,17 +49,6 @@ impl TorrentData {
             format!("{:.1}%", self.percent_complete()),
             self.time_elapsed(),
         ]
-    }
-
-    pub fn tracker_table_row_data(&self) -> Vec<[String; 2]> {
-        self.trackers
-            .iter()
-            .map(|tracker| {
-                [
-                    tracker.url.to_string(),
-                    tracker.num_peers.to_string(),
-                ]
-            }).collect()
     }
 
     pub fn peer_table_row_data(&self) -> Vec<[String; 5]> {

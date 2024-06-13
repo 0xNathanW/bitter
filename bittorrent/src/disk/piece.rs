@@ -1,4 +1,3 @@
-use core::panic;
 use std::{io::{Read, Seek, Write}, sync::Arc};
 use sha1::{Sha1, Digest};
 use crate::{block::Block, BLOCK_SIZE};

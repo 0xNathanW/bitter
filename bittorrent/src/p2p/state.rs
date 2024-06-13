@@ -26,9 +26,12 @@ pub struct SessionState {
     // Whether the peer is interested in our pieces.
     pub peer_interested: bool,
 
+    // Stats on download/upload throughput.
     pub throughput: ThroughputStats,
 
     pub num_pieces: usize,
+
+    pub connect_time: Option<std::time::Instant>,
 
     pub changed: bool,
 
@@ -44,6 +47,7 @@ impl Default for SessionState {
             peer_interested: false,
             throughput: ThroughputStats::default(),
             changed: false,
+            connect_time: None,
             num_pieces: 0,
         }
     }

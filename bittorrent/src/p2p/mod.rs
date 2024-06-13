@@ -16,7 +16,7 @@ pub type PeerTx = mpsc::UnboundedSender<PeerCommand>;
 #[derive(thiserror::Error, Debug)]
 pub enum PeerError {
 
-    #[error("IO: {0}")]
+    #[error("io: {0}")]
     Io(#[from] std::io::Error),
     
     #[error("handshake provided incorrect protocol")]
@@ -80,9 +80,8 @@ pub struct PeerHandle {
 
 impl PeerHandle {
 
-    fn new(peer_tx: PeerTx, handle: JoinHandle<Result<()>>) -> PeerHandle {
-        PeerHandle {
-            // id: None,
+    fn new(peer_tx: PeerTx, handle: JoinHandle<Result<()>>) -> Self {
+        Self {
             peer_tx: Some(peer_tx),
             session_handle: Some(handle),
             state: SessionState::default(),
@@ -93,11 +92,11 @@ impl PeerHandle {
         mut session: PeerSession,
         peer_tx: PeerTx,
         socket: Option<tokio::net::TcpStream>
-    ) -> PeerHandle {
+    ) -> Self {
         let handle = tokio::spawn(async move {
-            session.start_session(socket)
-                .await
-                .map_err(|e| {tracing::error!("peer session error: {}", e); e})
+            let session_result = session.start_session(socket).await;
+            session.disconnect().await;
+            session_result
         });
         PeerHandle::new(peer_tx, handle)
     }
