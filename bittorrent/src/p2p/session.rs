@@ -16,7 +16,7 @@ type MessageSink = SplitSink<Framed<TcpStream, MessageCodec>, Message>;
 pub struct PeerSession {
 
     // The peer's IP address.
-    address: SocketAddr,
+    pub address: SocketAddr,
 
     // Context is a read only state accessible by all peers.
     torrent_ctx: Arc<TorrentContext>,
@@ -70,7 +70,7 @@ impl PeerSession {
         let mut socket = if let Some(stream) = inbound_stream {
             Framed::new(stream, HandshakeCodec)
         } else {
-            let timeout = time::Duration::from_secs(10);
+            let timeout = time::Duration::from_secs(5);
             let stream = time::timeout(timeout, TcpStream::connect(self.address))
                 .await
                 .map_err(|_| PeerError::Timeout)??;
@@ -98,14 +98,14 @@ impl PeerSession {
         let handshake = Handshake::new(self.torrent_ctx.info_hash, self.torrent_ctx.client_id);
 
         if !inbound {
-            tracing::info!("send handshake");
+            tracing::trace!("send handshake");
             socket.send(handshake).await?;
         }
 
         tracing::trace!("waiting for handshake");
         // Receive handshake.
         if let Some(Ok(handshake)) = socket.next().await {
-            tracing::info!("read: handshake");
+            tracing::trace!("read: handshake");
 
             // Validate handshake.
             if handshake.protocol != PROTOCOL {
@@ -117,11 +117,11 @@ impl PeerSession {
 
             // Respond with handshake if connection is inbound.
             if inbound {
-                tracing::info!("send handshake");
+                tracing::trace!("send handshake");
                 socket.send(handshake).await?;
             }
 
-            tracing::info!("handshake successful, peer connected");
+            tracing::trace!("handshake successful, peer connected");
             Ok(())
 
         } else {
@@ -152,7 +152,7 @@ impl PeerSession {
 
                     // From torrent.
                     PeerCommand::Shutdown => {
-                        tracing::info!("session shutdown");
+                        tracing::trace!("session shutdown");
                         break;
                     },
                 
@@ -170,12 +170,12 @@ impl PeerSession {
     // Logs a message and sends to peer.
     #[inline(always)]
     async fn send_message(&mut self, sink: &mut MessageSink, msg: Message) -> Result<()> {
-        tracing::info!("send: {}", msg);
+        tracing::trace!("send: {}", msg);
         sink.send(msg).await
     }
 
     async fn handle_msg(&mut self, sink: &mut MessageSink, msg: Message) -> Result<()> {
-        tracing::info!("read: {}", msg);
+        tracing::trace!("read: {}", msg);
 
         match msg {
 
@@ -257,7 +257,7 @@ impl PeerSession {
     }
 
     async fn handle_bitfield(&mut self, sink: &mut MessageSink, mut bitfield: Bitfield) -> Result<()> {
-        tracing::info!("peer has {}/{} pieces", bitfield.count_ones(), self.torrent_ctx.info.num_pieces);
+        tracing::trace!("peer has {}/{} pieces", bitfield.count_ones(), self.torrent_ctx.info.num_pieces);
         // Remove trailing bits.
         bitfield.resize(self.torrent_ctx.info.num_pieces as usize, false);
         // Interested if peer has pieces we don't.
@@ -414,7 +414,7 @@ impl PeerSession {
         // sink.send_all(&mut stream).await?;
 
         for block in requests {
-            tracing::info!("send request: {:?}", block);
+            tracing::trace!("send request: {:?}", block);
             self.requests_out.insert(block);
             sink.send(Message::Request(block)).await?;
         }
@@ -437,7 +437,7 @@ impl PeerSession {
 
     // Free all requested blocks, making them available for other peers.
     async fn free_requests_out(&mut self) {
-        tracing::info!("freeing requested blocks");
+        tracing::trace!("freeing requested blocks");
         let partial_pieces = self.torrent_ctx.picker.partial_pieces.read().await;
         for request in self.requests_out.drain() {
             if let Some(partial_piece) = partial_pieces.get(&request.piece_idx) {

@@ -3,16 +3,15 @@ use crossterm::{execute, terminal::*, ExecutableCommand};
 use tui::app::App;
 use simplelog::*;
 
-
-#[tokio::main(flavor = "multi_thread", worker_threads = 4)]
+#[tokio::main]
 async fn main() -> color_eyre::Result<()> {
 
     // Setup logging
-    // let log_file = File::create("tui.log")?;
-    // WriteLogger::init(LevelFilter::Info, Config::default(), log_file)?;
+    let log_file = File::create("tui.log")?;
+    WriteLogger::init(LevelFilter::Info, Config::default(), log_file)?;
     // console_subscriber::init();
 
-    init_panic_hooks()?;
+    // init_panic_hooks()?;
 
     let mut app = App::new()?;
     
@@ -23,6 +22,9 @@ async fn main() -> color_eyre::Result<()> {
     log::info!("entered alternate screen mode.");
 
     let r = app.run().await;
+    if let Err(e) = r {
+        log::error!("{:?}", e);
+    }
     app.shutdown().await;
 
     // Return control of the terminal.
@@ -31,9 +33,6 @@ async fn main() -> color_eyre::Result<()> {
     disable_raw_mode()?;
     log::info!("left alternate screen mode.");
 
-    if let Err(e) = r {
-        log::error!("{:?}", e);
-    }
 
     Ok(())
 }

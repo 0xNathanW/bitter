@@ -21,6 +21,8 @@ pub enum ClientError {
         #[error("client channel error: {0}")]
         ChannelError(String),
 
+        #[error("io error: {0}")]
+        IoError(#[from] std::io::Error),
 }
 
 impl<T> From<mpsc::error::SendError<T>> for ClientError {
@@ -109,6 +111,10 @@ pub struct Client {
 
     config: Config,
 
+    // Last used listening port.
+    // Incremented by 1 for each new torrent.
+    current_port: u16,
+
 }
 
 impl Client {
@@ -116,6 +122,7 @@ impl Client {
     pub fn new(config: Config, user_tx: UserTx) -> (Self, ClientTx) {
         let (client_tx, client_rx) = mpsc::unbounded_channel();
         let (disk_handle, disk_tx) = disk::spawn_disk(client_tx.clone());
+        let current_port = config.listen_port_start;
         (
             Client {
                 torrents: HashMap::new(),
@@ -124,6 +131,7 @@ impl Client {
                 disk_tx,
                 disk_handle: Some(disk_handle),
                 config,
+                current_port,
             },
             client_tx,
         )
@@ -143,6 +151,7 @@ impl Client {
                             if let Some(t) = self.torrents.get_mut(&id) {
                                 t.torrent_tx.send(torrent::TorrentCommand::Bitfield(bf))?;
                             }
+                            self.user_tx.send(UserCommand::TorrentResult { id, result: Ok(()) })?;
                         },
                         Err(e) => {
                             tracing::error!("torrent allocation error: {}", e);
@@ -183,7 +192,9 @@ impl Client {
             config: self.config.clone(),
             disk_tx: self.disk_tx.clone(),
             user_tx: self.user_tx.clone(),
+            listen_port: self.current_port,
         });
+        self.current_port += 1;
         
         // If the torrent is multi file, create a directory for it.
         let dir = if metainfo.is_multi_file() {
@@ -213,7 +224,14 @@ impl Client {
             torrent_tx: torrent_tx.clone(),
         })?;
 
-        let handle = tokio::task::spawn(async move { torrent.start().await });
+        let handle = tokio::task::spawn(async move { 
+            let res = torrent.start().await;
+            if let Err(e) = &res {
+                tracing::error!("torrent {} error: {}", hex::encode(id), e);
+            }
+            res
+        });
+
         self.torrents.insert(
             id,
             TorrentHandle {

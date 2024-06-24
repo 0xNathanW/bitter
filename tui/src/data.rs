@@ -55,7 +55,7 @@ impl TorrentData {
         
         let mut peer_stats = self.data.peer_stats.clone();
         peer_stats.sort_by(|a, b| {
-            b.throughput.down.avg().partial_cmp(&a.throughput.down.avg()).unwrap()
+            b.state.throughput.down.avg().partial_cmp(&a.state.throughput.down.avg()).unwrap()
         });
 
         peer_stats
@@ -70,9 +70,9 @@ impl TorrentData {
                         ConnState::Introducing => "introducing".to_string(),
                         ConnState::Connecting => "connecting".to_string(),
                     },
-                    format!("{:.1}%", peer.num_pieces as f64 / self.num_pieces as f64 * 100.0),
-                    format!("{:.2}", peer.throughput.down.avg() as f64 / 1024.0),
-                    format!("{:.2}", peer.throughput.up.avg() as f64 / 1024.0),
+                    format!("{:.1}%", peer.state.num_pieces as f64 / self.num_pieces as f64 * 100.0),
+                    format!("{:.2}", peer.state.throughput.down.avg() as f64 / 1024.0),
+                    format!("{:.2}", peer.state.throughput.up.avg() as f64 / 1024.0),
                 ]
         }).collect()
     }

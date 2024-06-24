@@ -1,6 +1,7 @@
 use std::{collections::HashMap, io::{stdout, Stdout}, time::Duration};
 use bittorrent::{ClientHandle, UserCommand, MetaInfo, TorrentID, UserRx};
 use crossterm::event::{self, poll, Event};
+use futures::StreamExt;
 use ratatui::{backend::CrosstermBackend, layout::Layout, prelude::*, widgets, Frame};
 use color_eyre::Result;
 use crate::{data::TorrentData, ui};
@@ -62,6 +63,7 @@ impl App {
     pub async fn run(&mut self) -> Result<()> {
 
         let mut terminal = ratatui::Terminal::new(CrosstermBackend::new(stdout()))?;
+        let mut events = event::EventStream::new();
 
         // Initially enter the file explorer, to let user pick file.
         // Also can't render the UI without a file to download.
@@ -69,25 +71,19 @@ impl App {
 
         loop {
             
-            if self.quit {
-                break;
-            }
-
-            terminal.draw(|f| self.view(f))?;
-            
-            if poll(Duration::from_millis(100))? {
-                let event = event::read()?;
-                self.handle_event(event, &mut terminal)?;
-            }
-
-            tokio::select! {
+            tokio::select! { biased;
                 
+                Some(event) = events.next() => {
+                    let event = event?;
+                    self.handle_event(event, &mut terminal)?;
+                },
+
                 // Some event from our bittorrent client
                 Some(client_event) = self.user_rx.recv() => {
                     match client_event {
                         
                         UserCommand::TorrentResult { id, result } => {
-                            log::info!("torrent result: {:?}", result);
+                            log::info!("torrent result {:?}: {:?}",id ,result);
                             let _idx = self.torrent_lookup
                                 .get(&id)
                                 .ok_or(color_eyre::eyre::anyhow!("torrent not found (result)"))?;
@@ -109,6 +105,12 @@ impl App {
                         },
                     }
                 },
+            }
+
+            terminal.draw(|f| self.view(f))?;
+
+            if self.quit {
+                break;
             }
 
             debug_assert!(self.selected_idx < self.torrents.len());
@@ -157,7 +159,7 @@ impl App {
         match event {
             Event::Key(key) => {
                 if key.kind != event::KeyEventKind::Press {
-                    return Ok(());    
+                    return Ok(());
                 }
 
                 match key.code {

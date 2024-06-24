@@ -1,4 +1,5 @@
 use tokio::{sync::mpsc, task::JoinHandle};
+use tracing::span;
 use crate::block::Block;
 
 mod session;
@@ -68,36 +69,34 @@ pub enum PeerCommand {
 pub struct PeerHandle {
 
     // Sends commands to the torrent.
-    pub peer_tx: Option<PeerTx>,
-
-    // Tracks the state of the peer session.
-    pub state: SessionState,
+    pub peer_tx: PeerTx,
 
     // Handle to the peer session.
     pub session_handle: Option<JoinHandle<Result<()>>>,
+
+    // Tracks the state of the peer session.
+    pub state: SessionState,
     
 }
 
 impl PeerHandle {
-
-    fn new(peer_tx: PeerTx, handle: JoinHandle<Result<()>>) -> Self {
-        Self {
-            peer_tx: Some(peer_tx),
-            session_handle: Some(handle),
-            state: SessionState::default(),
-        }
-    }
-    
     pub fn start_session(
         mut session: PeerSession,
         peer_tx: PeerTx,
         socket: Option<tokio::net::TcpStream>
     ) -> Self {
-        let handle = tokio::spawn(async move {
-            let session_result = session.start_session(socket).await;
+        let session_handle = Some(tokio::spawn(async move {
+            let _guard = span!(tracing::Level::INFO, "peer", "addr" = %session.address);
+            let session_result = session.start_session(socket)
+                .await
+                .map_err(|e| {tracing::error!("session error: {}", e); e});
             session.disconnect().await;
             session_result
-        });
-        PeerHandle::new(peer_tx, handle)
+        }));
+        PeerHandle {
+            peer_tx,
+            session_handle,
+            state: SessionState::default(),
+        }
     }
 }

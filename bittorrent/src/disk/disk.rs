@@ -30,7 +30,7 @@ impl Disk {
         )
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), name = "disk")]
     pub async fn run(&mut self) -> Result<()> {
 
         while let Some(cmd) = self.disk_rx.recv().await {

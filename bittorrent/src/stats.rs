@@ -40,11 +40,6 @@ pub struct PeerStats {
     pub address: std::net::SocketAddr,
 
     pub state: SessionState,
-
-    pub num_pieces: usize,
-
-    pub throughput: ThroughputStats,
-
 }
 
 #[derive(Debug, Default, Clone, Copy)]

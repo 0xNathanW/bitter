@@ -1,8 +1,4 @@
-use std::{
-    net::{Ipv4Addr, SocketAddr}, 
-    path::PathBuf, 
-    time::Duration
-};
+use std::{path::PathBuf, time::Duration};
 use url::Url;
 
 #[derive(Debug, Clone)]
@@ -12,7 +8,7 @@ pub struct Config {
 
     pub dir: PathBuf,
 
-    pub listen_address: SocketAddr,
+    pub listen_port_start: u16,
 
     pub custom_trackers: Vec<Url>,
 
@@ -31,7 +27,7 @@ impl Default for Config {
             dir: PathBuf::from("downloads"),
             announce_interval: Duration::from_secs(1800),
             custom_trackers: Vec::new(),
-            listen_address: SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 6881),
+            listen_port_start: 49152,  // IANA registered ephemeral ports.
             min_max_peers: (5, 100),
         }
     }

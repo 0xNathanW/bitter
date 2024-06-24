@@ -1,6 +1,6 @@
 use std::{net::{SocketAddr, IpAddr, Ipv4Addr}, time::{Instant, Duration}};
 use bytes::Buf;
-use reqwest::{Client, Url};
+use reqwest::{Client, ClientBuilder, Url};
 use serde::de;
 use serde_derive::Deserialize;
 
@@ -46,8 +46,10 @@ pub struct Tracker {
 impl Tracker {
 
     pub fn new(url: Url) -> Tracker {
+        let client = ClientBuilder::new().timeout(Duration::from_secs(10)).build().unwrap();
+
         Tracker {
-            client: Client::new(),
+            client,
             url,
             tracker_id: None,
             last_announce: None,
@@ -59,7 +61,6 @@ impl Tracker {
     // Sends announce to tracker.
     #[tracing::instrument(skip(params, self), fields(url = %self.url))]
     pub async fn send_announce(&mut self, params: AnnounceParams) -> Result<Vec<SocketAddr>> {
-        tracing::debug!("announce params: {:?}", params);
 
         let mut url = format!(
             "{}?info_hash={}&peer_id={}&port={}&uploaded={}&downloaded={}&left={}&compact=1",
@@ -87,6 +88,7 @@ impl Tracker {
             .await?
             .bytes()
             .await?;
+        tracing::debug!("announce response: {:?}", raw_resp);
         let resp: TrackerResponse = bencode::decode_bytes(&raw_resp)?;
         tracing::debug!("announce response: {:?}", resp);
         
@@ -107,7 +109,6 @@ impl Tracker {
             self.tracker_id = Some(tracker_id);
         }
 
-        tracing::info!("provided {} peers", resp.peers.len());
         Ok(resp.peers)
     }
 
