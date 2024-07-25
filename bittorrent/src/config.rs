@@ -1,10 +1,12 @@
 use std::{path::PathBuf, time::Duration};
 use url::Url;
 
+use crate::ID;
+
 #[derive(Debug, Clone)]
 pub struct Config {
 
-    pub client_id: [u8; 20],
+    pub client_id: ID,
 
     pub dir: PathBuf,
 
@@ -14,11 +16,11 @@ pub struct Config {
 
     pub announce_interval: Duration,
 
-    pub min_max_peers: (u32, u32),
+    pub max_peers: usize,
 
 }
 
-const DEFAULT_CLIENT_ID: [u8; 20] = *b"-RS0133-73b3b0b0b0b0";
+const DEFAULT_CLIENT_ID: ID = *b"-RS0133-73b3b0b0b0b0";
 
 impl Default for Config {
     fn default() -> Self {
@@ -28,7 +30,7 @@ impl Default for Config {
             announce_interval: Duration::from_secs(1800),
             custom_trackers: Vec::new(),
             listen_port_start: 49152,  // IANA registered ephemeral ports.
-            min_max_peers: (5, 100),
+            max_peers: 50,
         }
     }
 }

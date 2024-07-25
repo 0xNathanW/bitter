@@ -1,72 +1,49 @@
-use std::{net::{SocketAddr, IpAddr, Ipv4Addr}, time::{Instant, Duration}};
+use std::{net::{IpAddr, Ipv4Addr, SocketAddr}, time::{Duration, Instant}};
 use bytes::Buf;
-use reqwest::{Client, ClientBuilder, Url};
+use url::Url;
 use serde::de;
 use serde_derive::Deserialize;
+use super::{AnnounceParams, Result, Tracker, TrackerError, DEFAULT_MIN_ANNOUNCE_INTERVAL};
 
-// In cases where the tracker doesn't give us a min interval.
-const DEFAULT_MIN_ANNOUNCE_INTERVAL: u64 = 60; // seconds
+pub struct HttpTracker {
 
-pub type Result<T> = std::result::Result<T, TrackerError>;
+    client: reqwest::Client,
 
-#[derive(thiserror::Error, Debug)]
-pub enum TrackerError {
+    url: Url,
 
-    #[error("tracker request error: {0}")]
-    ReqwestError(#[from] reqwest::Error),
+    id: Option<String>,
 
-    #[error("error deserializing tracker response: {0}")]
-    BencodeError(#[from]bencode::Error),
+    last_announce: Option<Instant>,
 
-}
+    interval: Option<Duration>,
 
-#[derive(Debug)]
-pub struct Tracker {
-
-    // HTTP client.
-    client: Client,
-
-    // Tracker announce url.
-    pub url: Url,
-
-    // Tracker id, if sent by response.
-    pub tracker_id: Option<String>,
-
-    // Last time we sent an announce request.
-    pub last_announce: Option<Instant>,
-
-    // Interval for next announce request.
-    pub interval: Option<Duration>,
-
-    // Minimum interval for next announce request.
-    pub min_interval: Option<Duration>,
+    min_interval: Option<Duration>,
 
 }
 
-impl Tracker {
-
-    pub fn new(url: Url) -> Tracker {
-        let client = ClientBuilder::new().timeout(Duration::from_secs(10)).build().unwrap();
-
-        Tracker {
-            client,
+impl HttpTracker {
+    pub fn new(url: Url) -> Self {
+        Self {
+            client: reqwest::Client::new(),
             url,
-            tracker_id: None,
+            id: None,
             last_announce: None,
             interval: None,
             min_interval: None,
         }
     }
+}
 
-    // Sends announce to tracker.
-    #[tracing::instrument(skip(params, self), fields(url = %self.url))]
-    pub async fn send_announce(&mut self, params: AnnounceParams) -> Result<Vec<SocketAddr>> {
+#[async_trait::async_trait]
+impl Tracker for HttpTracker {
+    
+    async fn announce(&mut self, params: AnnounceParams) -> Result<Vec<SocketAddr>> {
 
         let mut url = format!(
             "{}?info_hash={}&peer_id={}&port={}&uploaded={}&downloaded={}&left={}&compact=1",
             self.url.as_str(),
             urlencoding::encode_binary(&params.info_hash),
-            urlencoding::encode_binary(&params.peer_id),
+            urlencoding::encode_binary(&params.client_id),
             params.port,
             params.uploaded,
             params.downloaded,
@@ -78,9 +55,10 @@ impl Tracker {
         if let Some(num_peers) = params.num_want {
             url.push_str(&format!("&numwant={}", num_peers));
         }
-        if let Some(tracker_id) = params.tracker_id {
+        if let Some(tracker_id) = &self.id {
             url.push_str(&format!("&tracker_id={}", tracker_id));
         }
+        tracing::debug!("announce url: {}", url);
 
         let raw_resp = self.client
             .get(url)
@@ -88,12 +66,12 @@ impl Tracker {
             .await?
             .bytes()
             .await?;
-        tracing::debug!("announce response: {:?}", raw_resp);
-        let resp: TrackerResponse = bencode::decode_bytes(&raw_resp)?;
-        tracing::debug!("announce response: {:?}", resp);
+
+        let resp: HttpResponse = bencode::decode_bytes(&raw_resp)?;
+        tracing::debug!("announce response: {:#?}", resp);
         
         if let Some(failure) = resp.failure_reason {
-            tracing::warn!("failure: {}", failure);
+            return Err(TrackerError::ResponseError(failure));
         }
         if let Some(warning) = resp.warning_message {
             tracing::warn!("warning: {}", warning);
@@ -106,92 +84,38 @@ impl Tracker {
             self.min_interval = Some(Duration::from_secs(min_interval));
         }
         if let Some(tracker_id) = resp.tracker_id {
-            self.tracker_id = Some(tracker_id);
+            self.id = Some(tracker_id);
         }
 
+        self.last_announce = Some(Instant::now());
         Ok(resp.peers)
     }
 
-    // Returns true if time since last announce is greater than interval.
-    pub fn should_announce(&self, time: Instant) -> bool {
-        
-        if let Some(last_announce) = self.last_announce {
-            time.duration_since(last_announce) 
-            >= self.interval.unwrap_or(Duration::from_secs(DEFAULT_MIN_ANNOUNCE_INTERVAL))
-        
-        // If we haven't announced yet.
-        } else {
-            true
-        }
-    }
-
-    // Returns true if time since last announce is greater than min interval.
-    pub fn can_announce(&self, time: Instant) -> bool {
+    fn can_announce(&self, time: Instant) -> bool {
 
         if let Some(last_announce) = self.last_announce {
             time.duration_since(last_announce) 
             >= self.min_interval.unwrap_or(Duration::from_secs(DEFAULT_MIN_ANNOUNCE_INTERVAL))
 
-        // If we haven't announced yet.
         } else {
             true
         }
     }
-}
 
-#[derive(Copy, Clone, Debug, PartialEq)]
-pub enum Event {
-    Started,
-    Stopped,
-    Completed,
-}
+    fn should_announce(&self, time: Instant) -> bool {
+            
+        if let Some(last_announce) = self.last_announce {
+            time.duration_since(last_announce) 
+            >= self.interval.unwrap_or(Duration::from_secs(DEFAULT_MIN_ANNOUNCE_INTERVAL))
 
-impl std::fmt::Display for Event {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Event::Started => write!(f, "started"),
-            Event::Stopped => write!(f, "stopped"),
-            Event::Completed => write!(f, "completed"),
+        } else {
+            true
         }
-    }
-}
-
-// Announce params are serialized into a query string.
-#[derive(Debug)]
-pub struct AnnounceParams {
-    
-    // Hash of info dict.
-    pub info_hash:  [u8; 20],
-    
-    // Urlencoded 20-byte string used as a unique ID for the client.
-    pub peer_id:    [u8; 20],
-    
-    // Port number.
-    pub port:       u16,
-    
-    // The total amount uploaded (since the client sent the 'started' event to the tracker) in base ten ASCII..
-    pub uploaded:   u64,
-    
-    // The total amount downloaded (since the client sent the 'started' event to the tracker) in base ten ASCII..
-    pub downloaded: u64,
-    
-    // The number of bytes this client still has to download in base ten ASCII. 
-    // Clarification: The number of bytes needed to download to be 100% complete and get all the included files in the torrent.
-    pub left:       u64,
-    
-    // If specified, must be one of started, completed, stopped, (or empty which is the same as not being specified). 
-    // If not specified, then this request is one performed at regular intervals.
-    pub event:     Option<Event>,
-    
-    // Number of peers that the client would like to receive from the tracker.
-    pub num_want: Option<usize>,
-
-    // If a previous announce contained a tracker id, it should be set here.
-    pub tracker_id: Option<String>,
+    } 
 }
 
 #[derive(Deserialize, Debug, Default)]
-pub struct TrackerResponse {
+pub struct HttpResponse {
 
     // If present, then no other keys may be present. 
     // The value is a human-readable error message as to why the request failed (string).
@@ -304,7 +228,7 @@ mod tests {
     #[test]
     fn test_parse_response_binary() {
         let s = "64383a636f6d706c65746569396531303a696e636f6d706c657465693165383a696e74657276616c69313830306531323a6d696e20696e74657276616c693138303065353a706565727336303a52454d051ae1ca2f2a2ec00884937726decc61759ab8138851ab05e8f6bb5062f69770469247493ad4d005879f2ec8d54237ce44ea6043db8806c8d565";
-        let response: TrackerResponse = bencode::decode_bytes(&hex::decode(s).unwrap()).unwrap();        
+        let response: HttpResponse = bencode::decode_bytes(&hex::decode(s).unwrap()).unwrap();        
         assert_eq!(response.interval, Some(1800));
         assert_eq!(response.min_interval, Some(1800));
         assert_eq!(response.complete, Some(9));

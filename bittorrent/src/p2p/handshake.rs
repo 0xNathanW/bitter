@@ -7,12 +7,12 @@ pub const PROTOCOL: [u8; 19] = *b"BitTorrent protocol";
 pub struct Handshake {
     pub protocol:   [u8; 19],
     pub reserved:   [u8; 8],
-    pub info_hash:  [u8; 20],
-    pub peer_id:    [u8; 20],
+    pub info_hash:  ID,
+    pub peer_id:    ID,
 }
 
 impl Handshake {
-    pub fn new(info_hash: [u8; 20], peer_id: [u8; 20]) -> Self {
+    pub fn new(info_hash: ID, peer_id: ID) -> Self {
         Self {
             protocol:   PROTOCOL,
             reserved:   [0; 8], // TODO: Check there aren't any different situations for this.

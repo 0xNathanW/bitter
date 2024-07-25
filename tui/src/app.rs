@@ -1,6 +1,6 @@
-use std::{collections::HashMap, io::{stdout, Stdout}, time::Duration};
-use bittorrent::{ClientHandle, UserCommand, MetaInfo, TorrentID, UserRx};
-use crossterm::event::{self, poll, Event};
+use std::{collections::HashMap, io::{stdout, Stdout}};
+use bittorrent::{Handle, UserCommand, MetaInfo, ID, UserRx};
+use crossterm::event::{self, Event};
 use futures::StreamExt;
 use ratatui::{backend::CrosstermBackend, layout::Layout, prelude::*, widgets, Frame};
 use color_eyre::Result;
@@ -11,7 +11,7 @@ pub type Terminal = ratatui::Terminal<CrosstermBackend<Stdout>>;
 pub struct App {
     
     // Handle to the bittorrent client.
-    client:   ClientHandle,
+    client:   Handle,
     
     // Channel to recieve messages from the bittorrent client.
     user_rx:  UserRx,
@@ -20,7 +20,7 @@ pub struct App {
     torrents: Vec<TorrentData>,
 
     // Maps torrent id to index in the torrents vector.
-    torrent_lookup: HashMap<TorrentID, usize>,
+    torrent_lookup: HashMap<ID, usize>,
 
     file_explorer: ratatui_explorer::FileExplorer,
 
@@ -120,7 +120,7 @@ impl App {
     }
 
     pub async fn shutdown(&mut self) {
-        self.client.shutdown().await.ok();
+        self.client.shutdown();
     }
 
     // Main rendering function.

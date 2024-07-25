@@ -1,13 +1,13 @@
 use std::{io::{Read, Seek, Write}, sync::Arc};
 use sha1::{Sha1, Digest};
-use crate::{block::Block, BLOCK_SIZE};
+use crate::{block::Block, BLOCK_SIZE, ID};
 use super::{torrent::TorrentFile, Result};
 
 #[derive(Debug)]
-pub struct Piece {
+pub struct PieceBuf {
 
     // Piece hash originally given in metainfo.
-    pub hash: [u8; 20],
+    pub hash: ID,
 
     // Length of piece in bytes.
     pub len: usize,
@@ -23,9 +23,10 @@ pub struct Piece {
 
     // Range of file indices that the piece overlaps.
     pub file_overlap: std::ops::Range<usize>,
+
 }
 
-impl Piece {
+impl PieceBuf {
 
     pub fn add_block(&mut self, block: &Block) {
         let block_idx = block.offset / BLOCK_SIZE;
@@ -42,7 +43,7 @@ impl Piece {
         self.num_blocks_received == self.blocks_received.len() as u32
     }
 
-    // Hash the piece data and compare with hash given in metainfo.
+    // Hash the piece data and compare with hash given in metainfo (computationally expensive).
     pub fn verify_hash(&self) -> bool {
         let mut hasher = Sha1::new();
         hasher.update(&self.data);

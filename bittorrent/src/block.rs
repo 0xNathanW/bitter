@@ -1,4 +1,4 @@
-use crate::{store::TorrentInfo, BLOCK_SIZE};
+use crate::{info::TorrentInfo, BLOCK_SIZE};
 
 // The data of a block can either be:
 // 1. Owned - when peer sends us the data.

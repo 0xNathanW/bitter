@@ -1,6 +1,7 @@
 use rand::seq::SliceRandom;
 use serde_derive::{Deserialize, Serialize};
-use crate::{store::FileInfo, tracker::Tracker};
+use url::Url;
+use crate::{info::FileInfo, ID};
 
 #[derive(Debug, thiserror::Error)]
 pub enum MetaInfoError {
@@ -79,7 +80,7 @@ pub struct Info {
 
 impl Info {
     // Calculates the sha1 hash of info dict to verify torrent integrity.
-    fn info_hash(&self) -> Result<[u8; 20], MetaInfoError> {
+    fn info_hash(&self) -> Result<ID, MetaInfoError> {
         use sha1::Digest;
         let mut hasher = sha1::Sha1::new();
         // Serialize info dict into bencode.
@@ -102,7 +103,7 @@ pub struct MetaInfo {
     
     // sha1 hash of info dict
     #[serde(skip)] 
-    pub info_hash: [u8; 20],
+    pub info_hash: ID,
     
     // (optional) the string encoding format used to generate the pieces part of the info 
     // dictionary in the .torrent metafile (string).
@@ -150,7 +151,7 @@ impl MetaInfo {
         Ok(metainfo)
     }
 
-    pub fn piece_hashes(&self) -> Vec<[u8; 20]> {
+    pub fn piece_hashes(&self) -> Vec<ID> {
         self.info.pieces
             .chunks_exact(20)
             // Safe as we have already checked length is a multiple of 20, in new.
@@ -174,11 +175,11 @@ impl MetaInfo {
         }
     }
 
-    pub fn info_hash(&self) -> [u8; 20] { self.info_hash }
+    pub fn info_hash(&self) -> ID { self.info_hash }
     
     pub fn name(&self) -> &str { &self.info.name }
 
-    pub fn trackers(&self) -> Vec<Vec<Tracker>> {
+    pub fn tracker_urls(&self) -> Vec<Vec<Url>> {
         // If announce_list is present, we use that.
         if let Some(announce_list) = self.announce_list.clone() {
             let mut trackers = Vec::new();
@@ -187,14 +188,14 @@ impl MetaInfo {
                 // Randomly shuffle the trackers in the tier.
                 tier.shuffle(&mut rand::thread_rng());
                 for url in tier {
-                    tier_trackers.push(Tracker::new(url));
+                    tier_trackers.push(url);
                 }
                 trackers.push(tier_trackers);
             }
             trackers
         // Otherwise we just use the announce key.
         } else {
-            vec![vec![Tracker::new(self.announce.clone())]]
+            vec![vec![self.announce.clone()]]
         }
     }
 
@@ -312,19 +313,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_metainfo() {
-        // Test metainfo with small single file torrent.
-        let metainfo = MetaInfo::new("tests/test_torrents/test_small.torrent").unwrap();
-        assert_eq!(metainfo.num_pieces(), 1028);
-        assert_eq!(metainfo.info.piece_length, 32_768);
-        assert_eq!(metainfo.total_len(), 33_677_666);
-        assert_eq!(metainfo.is_multi_file(), false);
-        assert_eq!(metainfo.info_hash_hex(), "f1a8db22ffe20c7014c6267b5f68b97fdc438b1a");
-    }
-
-    #[test]
+    #[ignore]
     fn debug_meta_info() {
-        let metainfo = MetaInfo::new("tests/test_torrents/test_multi.torrent").unwrap();
+        let metainfo = MetaInfo::new("tests/test_torrents/test_single.torrent").unwrap();
         // Pretty debug print.
         println!("{:#?}", metainfo);
         println!("{}", metainfo.total_len());

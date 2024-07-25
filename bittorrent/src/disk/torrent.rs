@@ -6,16 +6,17 @@ use std::{
 };
 use sha1::Digest;
 use tokio::task::JoinHandle;
-
 use crate::{
     block::{num_blocks, Block, BlockData},
     metainfo,
     p2p::{PeerCommand, PeerTx},
-    store::TorrentInfo,
-    torrent::{TorrentCommand, TorrentTx}, Bitfield,
+    info::TorrentInfo,
+    torrent::{TorrentCommand, TorrentTx}, 
+    Bitfield,
+    ID,
 };
 use super::{
-    piece::{read_piece, Piece}, 
+    piece::{read_piece, PieceBuf}, 
     AllocationError, 
     BlockRequest, 
     Result,
@@ -25,14 +26,12 @@ use super::{
 #[derive(Debug)]
 pub struct Torrent {
 
-    // Info about the torrent.
     info: TorrentInfo,
     
-    // Correct hashes of pieces from metainfo.
-    piece_hashes: Vec<[u8; 20]>,
+    piece_hashes: Vec<ID>,
 
     // Place to collect pieces, idxed by piece idx.
-    write_buf: HashMap<usize, Piece>,
+    write_buf: HashMap<usize, PieceBuf>,
 
     // Context shared for piece writing task.
     ctx: Arc<Ctx>,
@@ -79,7 +78,7 @@ impl Torrent {
     pub fn new(
         files: Vec<metainfo::File>,
         dir: PathBuf,
-        piece_hashes: Vec<[u8; 20]>, 
+        piece_hashes: Vec<ID>, 
         info: TorrentInfo,
         torrent_tx: TorrentTx,
     ) -> std::result::Result<Self, AllocationError> {
@@ -144,7 +143,7 @@ impl Torrent {
         let piece = self.write_buf.entry(piece_idx).or_insert_with(|| {
             let len = self.info.piece_len(piece_idx);
             tracing::trace!("creating new piece {} in write buf", piece_idx);
-            Piece {
+            PieceBuf {
                 hash: self.piece_hashes[piece_idx],
                 len,
                 data: vec![0; len],

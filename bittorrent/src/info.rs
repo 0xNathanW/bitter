@@ -1,4 +1,3 @@
-use core::panic;
 use std::{path::PathBuf, ops::Range};
 use serde_derive::{Deserialize, Serialize};
 use crate::metainfo::MetaInfo;
@@ -36,16 +35,12 @@ impl FileInfo {
 #[derive(Debug, Clone)]
 pub struct TorrentInfo {
 
-    // Length of torrent in bytes.
     pub total_len: u64,
 
-    // Length of pieces in bytes.
     pub piece_len: usize,
 
-    // Length of the last piece, will be < piece_length.
     pub last_piece_len: usize,
 
-    // Number of pieces in torrent.
     pub num_pieces: u32,
 
 }
@@ -76,24 +71,3 @@ impl TorrentInfo {
         }
     }
 }
-
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-
-//     #[test]
-//     fn test_piece_file_intersections() {
-//         let path = std::path::Path::new("tests/test_torrents/test_multi.torrent");
-//         let metainfo = MetaInfo::new(path).unwrap();
-//         let store_info = TorrentInfo::new(&metainfo, std::path::PathBuf::from("freedom"));
-//         println!("{}", store_info.last_piece_len);
-//         for idx in 0..=8302 {
-//             assert_eq!(store_info.piece_file_intersections(idx), 0..1);
-//         }
-//         assert_eq!(store_info.piece_file_intersections(8303), 0..2);
-//         for idx in 8304..=11072 {
-//             assert_eq!(store_info.piece_file_intersections(idx), 1..2);
-//         }
-//         assert_eq!(store_info.piece_file_intersections(11073), 1..8);
-//     }
-// }

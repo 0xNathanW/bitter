@@ -3,10 +3,10 @@ use crate::stats::ThroughputStats;
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum ConnState {
     Connecting,
-    Connected,
-    Disconnected,
     Handshaking,
     Introducing, // Where peers tell each other what pieces they have.
+    Connected,
+    Disconnected,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -46,19 +46,14 @@ impl Default for SessionState {
             peer_choking: true,
             peer_interested: false,
             throughput: ThroughputStats::default(),
-            changed: false,
-            connect_time: None,
             num_pieces: 0,
+            connect_time: None,
+            changed: false,
         }
     }
 }
 
 impl SessionState {
-
-    pub fn tick(&mut self) {
-        self.throughput.reset();
-    }
-
     #[inline(always)]
     pub fn update(&mut self, f: impl FnOnce(&mut SessionState)) {
         f(self);

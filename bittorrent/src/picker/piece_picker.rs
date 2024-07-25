@@ -18,14 +18,14 @@ struct PieceInfo {
 }
 
 #[derive(Debug)]
-pub struct PiecePicker {
+pub struct Pieces {
     // All pieces in the torrent, idx aligned.
     pieces: Vec<PieceInfo>,
     // The pieces that we have.
     have: Bitfield,
 }
 
-impl PiecePicker {
+impl Pieces {
     
     pub fn new(num_pieces: usize) -> Self {
         let mut have = Bitfield::new();
@@ -40,6 +40,10 @@ impl PiecePicker {
         &self.have
     }
 
+    pub fn all(&self) -> bool {
+        self.have.all()
+    }
+    
     pub fn set_own_bitfield(&mut self, bf: Bitfield) {
         debug_assert_eq!(bf.len(), self.have.len());
         self.have = bf;

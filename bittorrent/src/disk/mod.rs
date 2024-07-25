@@ -1,12 +1,7 @@
-use tokio::{sync::mpsc, task};
+use tokio::{sync::{mpsc, oneshot}, task::{self, JoinHandle}};
+use tracing::Instrument;
 use crate::{
-    block::{Block, BlockRequest}, 
-    client::ClientTx, 
-    metainfo,
-    p2p::PeerTx,
-    store::TorrentInfo,
-    torrent::TorrentTx,
-    TorrentID
+    block::{Block, BlockRequest}, info::TorrentInfo, metainfo, p2p::PeerTx, torrent::TorrentTx, Bitfield, ID
 };
 
 mod piece;
@@ -31,11 +26,9 @@ pub enum DiskError {
     #[error("sync error: {0}")]
     SyncError(String),
 
-    #[error("channel error: {0}")]
-    ChannelError(String),
-
     #[error("torrent {0:?} not found")]
-    TorrentNotFound(TorrentID),
+    TorrentNotFound(ID),
+    
 }
 
 // Errors related to allocating a new torrent to disk.
@@ -56,15 +49,9 @@ impl<T> From<std::sync::PoisonError<T>> for DiskError {
     }
 }
 
-impl<T> From<mpsc::error::SendError<T>> for DiskError {
-    fn from(e: mpsc::error::SendError<T>) -> Self {
-        DiskError::ChannelError(e.to_string())
-    }
-}
-
-pub type Result<T> = std::result::Result<T, DiskError>;
+type Result<T> = std::result::Result<T, DiskError>;
 pub type DiskTx = mpsc::UnboundedSender<DiskCommand>;
-pub type DiskRx = mpsc::UnboundedReceiver<DiskCommand>;
+type DiskRx = mpsc::UnboundedReceiver<DiskCommand>;
 
 // TODO: command for removing a torrent from disk?
 pub enum DiskCommand {
@@ -72,43 +59,40 @@ pub enum DiskCommand {
     // Allocate a new torrent to disk.
     // Quite large but only sent once.
     NewTorrent {
-        // To identify the torrent.
-        id: TorrentID,
-        // Info for reads and writes.
+        id: ID,
         info: TorrentInfo,
-        // Piece hashes for verification.
-        piece_hashes: Vec<[u8; 20]>,
-        // Torrent files.
+        piece_hashes: Vec<ID>,
         files: Vec<metainfo::File>,
-        // Output directory for the torrent.
         dir: std::path::PathBuf,
-        // To send commands to the torrent task.
         torrent_tx: TorrentTx,
+        // Sends the bitfield to the torrent task.
+        tx: oneshot::Sender<std::result::Result<Bitfield, AllocationError>>,
     },
 
     // From peers sending blocks, write block data to disk.
     WriteBlock {
-        id: TorrentID,
+        id: ID,
         block: Block,
     },
 
     // From peers requesting blocks, read data from disk
     // and send read data through provided channel.
     ReadBlock {
-        id: TorrentID,
+        id: ID,
         block: BlockRequest,
         tx: PeerTx,
     },
 
     // Shutdown the disk task.
+    #[allow(dead_code)]
     Shutdown,
 
 }
 
-pub fn spawn_disk(client_tx: ClientTx) -> (task::JoinHandle<Result<()>>, DiskTx) {
-    tracing::info!("starting disk task");
-    let (mut disk, disk_tx) = disk::Disk::new(client_tx);
-    let handle = task::spawn(async move { disk.run().await });
+pub fn start_disk() -> (JoinHandle<()>, DiskTx) {
+    let (mut disk, disk_tx) = disk::Disk::new();
+    let handle = task::spawn(async move {
+        disk.run().await
+    }.instrument(tracing::info_span!("disk")));
     (handle, disk_tx)
 }
-

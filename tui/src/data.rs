@@ -42,7 +42,6 @@ impl TorrentData {
                 TorrentState::Downloading => "downloading".to_string(),
                 TorrentState::Seeding => "seeding".to_string(),
                 TorrentState::Paused => "paused".to_string(),
-                TorrentState::Announcing => "announcing".to_string(),
                 TorrentState::Checking => "checking".to_string(),
                 TorrentState::Stopped => "stopped".to_string(),
             },

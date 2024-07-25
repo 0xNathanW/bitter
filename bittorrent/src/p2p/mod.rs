@@ -1,6 +1,7 @@
+use std::{net::SocketAddr, sync::Arc};
 use tokio::{sync::mpsc, task::JoinHandle};
-use tracing::span;
-use crate::block::Block;
+use tracing::Instrument;
+use crate::{block::Block, torrent::TorrentContext};
 
 mod session;
 mod message;
@@ -17,7 +18,7 @@ pub type PeerTx = mpsc::UnboundedSender<PeerCommand>;
 #[derive(thiserror::Error, Debug)]
 pub enum PeerError {
 
-    #[error("io: {0}")]
+    #[error("io error: {0}")]
     Io(#[from] std::io::Error),
     
     #[error("handshake provided incorrect protocol")]
@@ -27,13 +28,10 @@ pub enum PeerError {
     IncorrectInfoHash,
 
     #[error("no handshake recieved")]
-    NoHandshake,    
+    NoHandshake,
 
     #[error("invalid message ID: {0}")]
     InvalidMessageId(u8),
-
-    #[error("channel error: {0}")]
-    Channel(String),
 
     #[error("bitfield sent before handshake")]
     UnexpectedBitfield,
@@ -45,12 +43,6 @@ pub enum PeerError {
     Timeout,
 }
 
-impl<T> From<mpsc::error::SendError<T>> for PeerError {
-    fn from(e: mpsc::error::SendError<T>) -> Self {
-        PeerError::Channel(e.to_string())
-    }
-}
-
 // Commands that can be sent to a peer.
 pub enum PeerCommand {
 
@@ -60,7 +52,6 @@ pub enum PeerCommand {
     // Block read from disk.
     BlockRead(Block),
 
-    // End the peer session safely.
     Shutdown,
 
 }
@@ -72,7 +63,7 @@ pub struct PeerHandle {
     pub peer_tx: PeerTx,
 
     // Handle to the peer session.
-    pub session_handle: Option<JoinHandle<Result<()>>>,
+    pub session_handle: JoinHandle<()>,
 
     // Tracks the state of the peer session.
     pub state: SessionState,
@@ -81,18 +72,19 @@ pub struct PeerHandle {
 
 impl PeerHandle {
     pub fn start_session(
-        mut session: PeerSession,
-        peer_tx: PeerTx,
+        address: SocketAddr,
+        ctx: Arc<TorrentContext>,
         socket: Option<tokio::net::TcpStream>
     ) -> Self {
-        let session_handle = Some(tokio::spawn(async move {
-            let _guard = span!(tracing::Level::INFO, "peer", "addr" = %session.address);
-            let session_result = session.start_session(socket)
-                .await
-                .map_err(|e| {tracing::error!("session error: {}", e); e});
+
+        let (mut session, peer_tx) = PeerSession::new(address, ctx);
+        let session_handle = tokio::spawn(async move {
+            if let Err(e) = session.start_session(socket).await {
+                tracing::error!("session error: {}", e);
+            }
             session.disconnect().await;
-            session_result
-        }));
+        }.instrument(tracing::info_span!("peer", addr = %address)));
+
         PeerHandle {
             peer_tx,
             session_handle,

@@ -46,17 +46,12 @@ disk:
     - handles read/writes 
 
 
+tracker control flow:
+    1. wait for change in watch chan:
+    2. recv value.
+    if announce:
+        
+    else: 
+        continue, the torrent needs no peers.
 
-    FATAL - This doesn't exist in Rust, because you panic!(), but I might as well include it either way.
-    You should use FATAL to log errors that are about to crash your application.
-    Example: FATAL: Syntax error in configuration file. Aborting.
-    ERROR - You should use ERROR to log errors within some specific task. These errors are causing a task to fail, but it's not the end of the world.
-    Example: ERROR: Broken pipe responding to request
-    WARN - You should use WARN to log errors that were recovered from. For example, things you're retrying again (if this fails again and you give up, it should end up being an ERROR)
-    INFO - You should use INFO to log informational messages like major status updates that are important at runtime:
-        INFO: Server listening on port 80
-        INFO: Logged into <API> as <USER>.
-        INFO: Completed daily database expiration task.
-    DEBUG - Now to the important part. DEBUG logs should basically always only log variables or decisions. You could use DEBUG logs whenever there's variables you need to log, or after a major decision like "user did this" or "choosing to use chunked sending"
-    TRACE - TRACE logs are purely "I am here!" logs. They are NOT used at the beginning or end of a block like an if statement to indicate "Hey, I made this choice!", they indicate "Hey, I'm making an API request... I'm done!"
-as
+

@@ -1,11 +1,12 @@
+use std::time::{Instant, Duration};
 use crate::{p2p::state::SessionState, torrent::TorrentState};
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct TorrentStats {
 
-    pub start_time: Option<std::time::Instant>,
+    pub start_time: Instant,
 
-    pub time_elapsed: std::time::Duration,
+    pub time_elapsed: Duration,
 
     pub state: TorrentState,
 
@@ -17,7 +18,7 @@ pub struct TorrentStats {
 
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct PieceStats {
 
     pub num_pieces: usize,
