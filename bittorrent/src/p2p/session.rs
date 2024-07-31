@@ -62,14 +62,14 @@ impl PeerSession {
     }
 
     pub async fn start_session(&mut self, inbound_stream: Option<TcpStream>) -> Result<()> {
-        self.state.update(|state| state.conn_state = ConnState::Connecting);
         let inbound = inbound_stream.is_some();
         let mut socket = self.connect(inbound_stream).await?;
         self.exchange_handshake(&mut socket, inbound).await?;
         let socket = socket.map_codec(|_| MessageCodec);
-        self.run(socket).await
+        self.run(socket).await?;
+        Ok(())
     }
-
+    
     async fn connect(&mut self, inbound_stream: Option<TcpStream>) -> Result<Framed<TcpStream, HandshakeCodec>> {
         self.state.update(|state| state.conn_state = ConnState::Connecting);
         if let Some(stream) = inbound_stream {
@@ -86,17 +86,16 @@ impl PeerSession {
     }
 
     pub async fn disconnect(&mut self) {
-        tracing::trace!("disconnecting peer");
+        tracing::info!("disconnecting peer");
         self.state.update(|state| *state = SessionState::default());
-        self.torrent_ctx.torrent_tx.send(TorrentCommand::PeerState {
+        let _ = self.torrent_ctx.torrent_tx.send(TorrentCommand::PeerState {
             address: self.address,
             state: self.state,
-        }).ok();
+        });
     }
 
     async fn exchange_handshake(&mut self, socket: &mut Framed<TcpStream, HandshakeCodec>, inbound: bool) -> Result<()> {
         
-        self.state.update(|state| state.conn_state = ConnState::Handshaking);
         let handshake = Handshake::new(self.torrent_ctx.info_hash, self.torrent_ctx.client_id);
         tracing::debug!("handshake: {:#?}", handshake);
 

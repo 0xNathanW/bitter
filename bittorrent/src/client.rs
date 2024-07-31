@@ -14,22 +14,20 @@ use crate::{
 pub enum ClientError {
 
         #[error("client has been unexpectedly dropped")]
-        ClientDropped,
+        ClientDropped(#[from] mpsc::error::SendError<ClientCommand>),
 
         #[error("client panicked")]
         ClientPanic,
         
-}
-
-impl<T> From<mpsc::error::SendError<T>> for ClientError {
-    fn from(_: mpsc::error::SendError<T>) -> Self {
-        ClientError::ClientDropped
-    }
+        #[error("disk task panicked")]
+        DiskFailure(#[from] mpsc::error::SendError<DiskCommand>),
 }
 
 pub enum ClientCommand {
 
     NewTorrent(MetaInfo),
+
+    RemoveTorrent(ID),
 
     Shutdown,
 
@@ -74,7 +72,7 @@ impl Client {
         )
     }
 
-    pub async fn run(&mut self) {
+    pub async fn run(&mut self) -> Result<()> {
         
         // Start the disk task.
         let (_, disk_tx) = start_disk();
@@ -82,18 +80,23 @@ impl Client {
         while let Some(cmd) = self.client_rx.recv().await {
             match cmd {
                 
-                ClientCommand::NewTorrent(metainfo) => {
-                    // this is a bit messy because it returns as client dropped
-                    // but its ok for now
-                    if let Err(_) = self.new_torrent(metainfo, &disk_tx).await{
-                        return self.shutdown().await
+                ClientCommand::NewTorrent(metainfo) => self.new_torrent(metainfo, &disk_tx).await?,
+
+                ClientCommand::RemoveTorrent(id) => {
+                    if let Some(torrent) = self.torrents.remove(&id) {
+                        let _ = torrent.torrent_tx.send(torrent::TorrentCommand::Shutdown);
+                        disk_tx.send(DiskCommand::RemoveTorrent(id))?;
+                    } else {
+                        tracing::warn!("attempted to remove non-existent torrent: {}", hex::encode(id));
                     }
                 }
 
-                ClientCommand::Shutdown => return self.shutdown().await,
+                ClientCommand::Shutdown => return Ok(self.shutdown().await),
 
             }
         }
+
+        Ok(())
     }
 
     async fn new_torrent(&mut self, metainfo: MetaInfo, disk_tx: &DiskTx) -> Result<()> {

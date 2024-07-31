@@ -26,9 +26,6 @@ pub enum DiskError {
     #[error("sync error: {0}")]
     SyncError(String),
 
-    #[error("torrent {0:?} not found")]
-    TorrentNotFound(ID),
-    
 }
 
 // Errors related to allocating a new torrent to disk.
@@ -56,8 +53,6 @@ type DiskRx = mpsc::UnboundedReceiver<DiskCommand>;
 // TODO: command for removing a torrent from disk?
 pub enum DiskCommand {
 
-    // Allocate a new torrent to disk.
-    // Quite large but only sent once.
     NewTorrent {
         id: ID,
         info: TorrentInfo,
@@ -68,6 +63,8 @@ pub enum DiskCommand {
         // Sends the bitfield to the torrent task.
         tx: oneshot::Sender<std::result::Result<Bitfield, AllocationError>>,
     },
+
+    RemoveTorrent(ID),
 
     // From peers sending blocks, write block data to disk.
     WriteBlock {
@@ -83,7 +80,6 @@ pub enum DiskCommand {
         tx: PeerTx,
     },
 
-    // Shutdown the disk task.
     #[allow(dead_code)]
     Shutdown,
 

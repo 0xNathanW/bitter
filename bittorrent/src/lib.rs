@@ -25,9 +25,8 @@ pub type ID = [u8; 20];
 pub enum UserCommand {
 
     // Sent when a torrent has finished.
-    TorrentResult {
+    TorrentFinished {
         id: ID,
-        result: torrent::Result<()>,
     },
 
     // Sent every second with the current stats of a torrent.
@@ -53,7 +52,9 @@ pub fn start_client(config: Option<Config>) -> (Handle, UserRx) {
     let (user_tx, user_rx) = mpsc::unbounded_channel();
     let (mut client, client_tx) = client::Client::new(config.unwrap_or_default(), user_tx);
     let client_handle = tokio::spawn(async move { 
-        client.run().await
+        if let Err(e) = client.run().await {
+            tracing::error!("client runtime error:  {:?}", e);
+        }
     });
     (
         Handle {
@@ -77,6 +78,11 @@ impl Handle {
     
         pub fn new_torrent(&self, metainfo: MetaInfo) -> Result<()> {
             self.client_tx.send(ClientCommand::NewTorrent(metainfo))?;
+            Ok(())
+        }
+
+        pub async fn remove_torrent(&self, id: ID) -> Result<()> {
+            self.client_tx.send(ClientCommand::RemoveTorrent(id))?;
             Ok(())
         }
 

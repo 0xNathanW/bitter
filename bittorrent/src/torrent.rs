@@ -90,7 +90,7 @@ impl TorrentHandle {
                 tracing::error!("torrent error: {}", e);
             }
             torrent.shutdown().await;
-        }.instrument(tracing::info_span!("torrent", id = %hex::encode(info_hash))));
+        }.instrument(tracing::info_span!("torrent", id = %hex::encode(info_hash)[..4])));
         
         TorrentHandle {
             torrent_tx,
@@ -289,24 +289,25 @@ impl Torrent {
         
         // Announce completed event to trackers.
         self.trackers.shutdown().await;
-        self.user_tx.send(crate::UserCommand::TorrentResult {
-            id: self.ctx.info_hash,
-            result: Ok(()),
-        }).ok();
+        let _ = self.user_tx.send(crate::UserCommand::TorrentFinished { id: self.ctx.info_hash });
     }
 
     async fn manage_peer_nums(&mut self) {
 
         let count_to_max = self.config.max_peers - self.peers.len();
         let connect_count = count_to_max.min(self.available.len());
-        tracing::info!("attempting to connect to {} peers", connect_count); 
+        tracing::info!("num peers {}, attempting {} new", self.peers.len(), connect_count); 
         // If there is enough in available, connect to max, otherwise connect to as many possible and announce the number remaining.
         for address in self.available.drain(..connect_count) {
+            if self.peers.contains_key(&address) {
+                tracing::warn!("peer already connected: {}", address);
+                continue;
+            }
             self.peers.insert(address, PeerHandle::start_session(address, self.ctx.clone(), None));
         }
         if self.peers.len() == self.config.max_peers as usize {
             tracing::info!("max peers reached");
-            self.trackers.tracker_tx.send(None).ok();
+            let _ = self.trackers.tracker_tx.send(None);
         } else {
             self.announce(None).await;
         }
@@ -356,8 +357,10 @@ impl Torrent {
             let num_pieces_missing = self.ctx.picker.pieces.read().await.own_bitfield().count_zeros();
             tracing::info!("piece {} downloaded, {} pieces remain", idx, num_pieces_missing);
 
-            for peer in self.peers.values() {
-                let _ = peer.peer_tx.send(PeerCommand::PieceWritten(idx));
+            for (addr, peer) in &self.peers {
+                if let Err(_) = peer.peer_tx.send(PeerCommand::PieceWritten(idx)) {
+                    tracing::error!("peer {} unexpectedly dropped", addr);
+                };
             }
 
             // Check if torrent is fully downloaded.

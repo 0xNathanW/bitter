@@ -22,7 +22,7 @@ pub struct PieceBuf {
     pub num_blocks_received: u32,
 
     // Range of file indices that the piece overlaps.
-    pub file_overlap: std::ops::Range<usize>,
+    pub file_range: std::ops::Range<usize>,
 
 }
 
@@ -56,7 +56,6 @@ impl PieceBuf {
         let mut total_offset = piece_offset;
         let mut bytes_written = 0;
         
-        let files = &files[self.file_overlap.clone()];
         for file in files {
             let mut f = file.file_lock.write()?;
             

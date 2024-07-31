@@ -130,6 +130,7 @@ pub trait Tracker: Send + Sync {
                 || self.should_announce(time) {
 
                     let peers = self.announce(params).await?;
+                    tracing::info!("provided {} peers", peers.len());
                     if torrent_tx.send(TorrentCommand::Peers(peers)).is_err() {
                         return Ok(());
                     }

@@ -1,5 +1,6 @@
 use bytes::{BufMut, Buf, BytesMut};
 use tokio_util::codec::{Encoder, Decoder};
+use crate::ID;
 use super::PeerError;
 
 pub const PROTOCOL: [u8; 19] = *b"BitTorrent protocol";

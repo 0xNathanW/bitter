@@ -18,16 +18,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // let metainfo = MetaInfo::new("bittorrent/tests/test_torrents/test_smol.torrent")?;
     // client.new_torrent(metainfo)?;
     
-    let metainfo = MetaInfo::new("bittorrent/tests/test_torrents/test_single.torrent")?;
+    let metainfo = MetaInfo::new("bittorrent/tests/test_torrents/test_multi.torrent")?;
     client.new_torrent(metainfo)?;
 
     while let Some(cmd) = rx.recv().await {
         match cmd {
-            UserCommand::TorrentResult { id, result } => {
-                tracing::error!("torrent result {}: {:?}", hex::encode(id), result);
+            UserCommand::TorrentFinished { id} => {
+                // tracing::error!("torrent result {}: {:?}", hex::encode(id), result);
             },
             UserCommand::TorrentStats { id, stats } => {
-                tracing::error!("stats: {}", hex::encode(id));
+                // stats.peer_stats.iter().for_each(|peer| {
+                //     tracing::info!("peer: {:#?}", peer);
+                // });
             },
         }
     }

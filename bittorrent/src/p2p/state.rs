@@ -3,7 +3,6 @@ use crate::stats::ThroughputStats;
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum ConnState {
     Connecting,
-    Handshaking,
     Introducing, // Where peers tell each other what pieces they have.
     Connected,
     Disconnected,

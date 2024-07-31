@@ -61,6 +61,15 @@ impl Disk {
                     let _ = tx.send(msg);
                 },
 
+                DiskCommand::RemoveTorrent(id) => {
+                    if let Some(torrent) = self.torrents.remove(&id) {
+                        // Wait for write lock to wait for pending writes/reads, then drop.
+                        let _ = torrent.write().await;
+                    } else {
+                        tracing::warn!("attempted to remove non-existent torrent: {}", hex::encode(id));
+                    }
+                },
+
                 DiskCommand::WriteBlock { id, block } => {
                     if let Some(torrent) = self.torrents.get(&id) {
                         torrent

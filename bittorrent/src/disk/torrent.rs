@@ -38,7 +38,7 @@ pub struct Torrent {
     
 }
 
-// Ctx involves data needed for the IO threads.
+// Ctx involves data needed for the read/write tasks.
 #[derive(Debug)]
 struct Ctx {
 
@@ -138,7 +138,6 @@ impl Torrent {
 
     pub fn write_block(&mut self, block: Block) {
         // Block info is validated in the peer session.
-
         let piece_idx = block.piece_idx;
         let piece = self.write_buf.entry(piece_idx).or_insert_with(|| {
             let len = self.info.piece_len(piece_idx);
@@ -149,36 +148,41 @@ impl Torrent {
                 data: vec![0; len],
                 blocks_received: vec![false; num_blocks(len) as usize],
                 num_blocks_received: 0,
-                file_overlap: piece_file_intersections(&self.info, &self.ctx.files, piece_idx),
+                file_range: piece_file_intersections(&self.info, &self.ctx.files, piece_idx),
             }
         });
 
         piece.add_block(&block);
         tracing::trace!("piece {}: {} blocks received out of {}", piece_idx, piece.num_blocks_received, num_blocks(piece.len));
         
-        // If we have all the blocks for this piece, write piece to disk.
         if piece.is_complete() {
             tracing::trace!("all blocks received for piece {} ... writing", piece_idx);
-
-            let piece = self.write_buf.remove(&piece_idx).expect("piece not found in write buf");
-            let offset = piece_idx * self.info.piece_len;
-            let ctx = Arc::clone(&self.ctx);
-
-            // Spawn a thread for expensive workload.
-            // TODO: maybe some error handling here on the message sends
-            let _: JoinHandle<Result<()>> = tokio::task::spawn_blocking(move || {
-
-                if piece.verify_hash() {
-                    piece.write(offset, &ctx.files)?;
-                    ctx.torrent_tx.send(TorrentCommand::PieceWritten { idx: piece_idx, valid: true })?;
-                } else {
-                    tracing::warn!("piece {} failed hash verification", piece_idx);
-                    ctx.torrent_tx.send(TorrentCommand::PieceWritten { idx: piece_idx, valid: false })?;
-                }
-
-                Ok(())
-            });
+            self.write_piece(piece_idx);
         }
+    }
+
+    fn write_piece(&mut self, piece_idx: usize) {
+
+        let piece = self.write_buf.remove(&piece_idx).expect("piece not found in write buf");
+        let offset = piece_idx * self.info.piece_len;
+        let ctx = Arc::clone(&self.ctx);
+
+        // Spawn a thread for expensive workload.
+        let _ = tokio::task::spawn_blocking(move || {
+
+            if piece.verify_hash() {
+                if let Err(e) = piece.write(offset, &ctx.files[piece.file_range.clone()]) {
+                    tracing::error!("failed to write piece {} to disk: {:?}", piece_idx, e);
+                    return;
+                };
+                let _ = ctx.torrent_tx.send(TorrentCommand::PieceWritten { idx: piece_idx, valid: true });
+            } else {
+                tracing::warn!("piece {} failed hash verification", piece_idx);
+                let _ = ctx.torrent_tx.send(TorrentCommand::PieceWritten { idx: piece_idx, valid: false });
+            }
+
+        });
+
     }
 
     // Reads a block from disk and sends it to the peer.
@@ -193,10 +197,10 @@ impl Torrent {
                 return Ok(());
             }
             
-            peer_tx.send(PeerCommand::BlockRead(Block:: from_block_request(
+            let _ = peer_tx.send(PeerCommand::BlockRead(Block:: from_block_request(
                 &block_info,
                 BlockData::Cached(Arc::clone(&cached[block_idx])),
-            ))).ok();
+            )));
         
         } else {
             // If not in cache, read from disk and put in cache.
@@ -205,18 +209,29 @@ impl Torrent {
             let len = self.info.piece_len(block_info.piece_idx);
             let ctx = Arc::clone(&self.ctx);
 
-            // TODO: IDK if this is right?
-            let _: JoinHandle<Result<()>> = tokio::task::spawn_blocking(move || {
+            let _ = tokio::task::spawn_blocking(move || {
                 // TODO: Do we want to handle error, continuing task?
-                let piece = read_piece(offset, len, &ctx.files[file_range])?;
+                let piece = match read_piece(offset, len, &ctx.files[file_range]) {
+                    Ok(piece) => piece,
+                    Err(e) => {
+                        tracing::error!("failed to read piece {}: {:?}", block_info.piece_idx, e);
+                        return;
+                    },
+                };
                 let block = Arc::clone(&piece[block_idx]);
 
-                ctx.read_cache.lock()?.put(block_info.piece_idx, piece);
-                peer_tx.send(PeerCommand::BlockRead(Block::from_block_request(
+                let mut cache_lock = match ctx.read_cache.lock() {
+                    Ok(cache) => cache,
+                    Err(e) => {
+                        tracing::error!("read cache poisoned: {:?}", e);
+                        return;
+                    },
+                };
+                cache_lock.put(block_info.piece_idx, piece);
+                let _ = peer_tx.send(PeerCommand::BlockRead(Block::from_block_request(
                     &block_info,
                     BlockData::Cached(block),
-                ))).ok();
-                Ok(())
+                )));
             });
         }
 
@@ -255,7 +270,6 @@ impl Torrent {
 }
 
 // Returns the idxs of the first and last file that a piece intersects.
-// TODO: kinda annoying this is not a method, but has to be, see if can fix.
 pub fn piece_file_intersections(info: &TorrentInfo, files: &[TorrentFile], piece_idx: usize) -> Range<usize> {
     // If only one file, there are no intersections to compute.
     if files.len() == 1 {
