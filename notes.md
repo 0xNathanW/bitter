@@ -1,4 +1,5 @@
 # Notes
+https://ratatui.rs/highlights/v027/
 
 IMMEDIATE TASK:
     - Get write tests working.
